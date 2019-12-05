@@ -1,0 +1,33 @@
+{
+	"$schema":"http://json-schema.org/draft-04/schema#",
+	"title":"empRefsForAgentAuths",
+	"description":"A list of Employer References requiring authorisation-related data - Version 0.C - David Anstey - 1/12/2014",
+	"type":"object",
+	"additionalProperties": false,
+	"properties":
+	{
+		"empRefList":
+		{
+			"type":"array",
+			"minItems":0,
+			"items":
+			{
+				"type": "object",
+				"additionalProperties": false,
+				"properties":
+				{
+					"districtNumber": {
+						"type":"string",
+						"pattern":"^\\d{1,3}$"
+					},
+					"reference": {
+						"type":"string",
+						"pattern":"^[A-Z0-9]{1,10}$"
+					}
+				},
+				"required":["districtNumber", "reference"]
+			}
+		}
+	},
+	"required":["empRefList"]
+}

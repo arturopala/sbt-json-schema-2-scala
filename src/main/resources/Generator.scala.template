@@ -1,0 +1,130 @@
+/*
+ * Copyright 2019 HM Revenue & Customs
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*package*/
+
+import java.time.format.DateTimeFormatter
+import org.scalacheck.Gen
+import uk.gov.hmrc.smartstub.{Addresses, Companies, Names, Temporal, ToLong}
+import wolfendale.scalacheck.regexp.RegexpGen
+
+object Generator extends Names with Temporal with Companies with Addresses {
+
+  implicit val tls: ToLong[String] = new ToLong[String] {
+    def asLong(s: String): Long = s.hashCode.toLong
+  }
+
+  def get[T](gen: Gen[T]): String => Option[T] =
+    (seed: String) => gen.seeded(seed)
+
+  def shake(seed: String): String = {
+    val p = seed.charAt(0).toInt % seed.length
+    val s = seed.drop(1) + seed.head
+    s.take(p).reverse + s.drop(p)
+  }
+
+  def variant(seed: String, i: Int): String = if (i == 0) seed else variant(shake(seed), i - 1)
+
+  def pattern(pattern: String): Gen[String] =
+    knownPatterns.getOrElse(pattern, PatternContext(StringContext(pattern)).pattern())
+
+  def regex(regex: String): Gen[String] =
+    knownRegex.getOrElse(regex, RegexpGen.from(regex).retryUntil(s => s.matches(regex)))
+
+  def toJodaDate(date: java.time.LocalDate): org.joda.time.LocalDate = org.joda.time.LocalDate.parse(date.toString)
+
+  lazy val booleanGen: Gen[Boolean] = Gen.frequency(80 -> Gen.const(true), 20 -> Gen.const(false))
+
+  case class OptionGenStrategy(someFrequency: Int)
+  val AlwaysSome = OptionGenStrategy(100)
+  val AlwaysNone = OptionGenStrategy(0)
+  val MostlySome = OptionGenStrategy(95)
+
+  def optionGen[T](gen: Gen[T])(implicit os: OptionGenStrategy = MostlySome): Gen[Option[T]] =
+    Gen.frequency(os.someFrequency -> gen.map(Some(_)), (100 - os.someFrequency) -> Gen.const(None))
+
+  def biasedOptionGen[T](gen: Gen[T]): Gen[Option[T]] = optionGen(gen)(MostlySome)
+
+  def nonEmptyListOfMaxN[T](max: Int, gen: Gen[T]): Gen[List[T]] =
+    for {
+      size <- Gen.chooseNum(1, max)
+      list <- Gen.listOfN(size, gen)
+    } yield list
+
+  def chooseBigDecimal(min: Double, max: Double, multipleOf: Option[Double]): Gen[BigDecimal] =
+    Gen
+      .chooseNum[Double](min.toDouble, max.toDouble)
+      .map(BigDecimal.decimal)
+      .map(bd =>
+        bd.quot(multipleOf.map(BigDecimal.decimal).getOrElse(1)) * multipleOf.map(BigDecimal.decimal).getOrElse(1))
+
+  def stringN(size: Int, charGen: Gen[Char] = Gen.alphaNumChar): Gen[String] =
+    Gen.listOfN(size, charGen).map(l => String.valueOf(l.toArray))
+
+  def stringMaxN(max: Int, charGen: Gen[Char] = Gen.alphaNumChar): Gen[String] =
+    for {
+      size   <- Gen.chooseNum(1, max)
+      string <- stringN(size, charGen)
+    } yield string
+
+  def stringMinMaxN(min: Int, max: Int, charGen: Gen[Char] = Gen.alphaNumChar): Gen[String] =
+    for {
+      size   <- Gen.chooseNum(min, max)
+      string <- stringN(size, charGen)
+    } yield string
+
+  lazy val emailGen: Gen[String] = for {
+    domain       <- Gen.oneOf(".com", ".co.uk", ".uk", ".eu", ".me")
+    size         <- Gen.chooseNum[Int](10, 32 - domain.length)
+    usernameSize <- Gen.chooseNum[Int](1, size - 3)
+    username     <- stringMaxN(usernameSize)
+    host         <- stringMaxN(size - usernameSize - 1)
+  } yield username + "@" + host + domain
+  def email(seed: String): String = emailGen.seeded(seed).get
+
+  case class Address(street: String, town: String, postcode: String)
+  lazy val addressGen: Gen[Address] = ukAddress
+    .map { case street :: town :: postcode :: Nil => Address(street, town, postcode) }
+  def address(userId: String): Address = addressGen.seeded(userId).get
+
+  case class Address4Lines35(line1: String, line2: String, line3: String, line4: String)
+  lazy val address4Lines35Gen: Gen[Address4Lines35] = surname
+    .flatMap(
+      s =>
+        ukAddress
+          .map {
+            case street :: town :: postcode :: Nil =>
+              Address4Lines35(street.take(35).replace(";", " "), s"The $s House".take(35), town.take(35), postcode)
+        })
+    .suchThat(_.line1.matches("""^[A-Za-z0-9 \-,.&'\/()!]{1,35}$"""))
+
+  lazy val `date_dd/MM/yy` = DateTimeFormatter.ofPattern("dd/MM/yy")
+  lazy val `date_dd/MM/yyyy` = DateTimeFormatter.ofPattern("dd/MM/yyyy")
+  lazy val `date_yyyy-MM-dd` = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+  lazy val `date_MMM` = DateTimeFormatter.ofPattern("MMM")
+
+  lazy val dateDDMMYYGen: Gen[String] = date(1970, 2017).map(_.format(`date_dd/MM/yy`))
+  lazy val dateDDMMYYYYGen: Gen[String] = date(1970, 2017).map(_.format(`date_dd/MM/yyyy`))
+  lazy val dateYYYYMMDDGen: Gen[String] = date(1970, 2017).map(_.format(`date_yyyy-MM-dd`))
+  lazy val shortMonthNameGen: Gen[String] = date(1970, 2017).map(_.format(`date_MMM`).toUpperCase)
+
+  object GenOps {
+    implicit class GenOps[T](val gen: Gen[T]) extends AnyVal {
+      def variant(v: String): Gen[T] = gen.withPerturb(s => s.reseed(s.long._1 + v.hashCode.toLong))
+    }
+  }
+
+}

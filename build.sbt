@@ -3,23 +3,28 @@ import uk.gov.hmrc.DefaultBuildSettings.targetJvm
 val pluginName = "sbt-json-schema-2-scala"
 
 lazy val root = Project(pluginName, base = file("."))
-  .enablePlugins(SbtAutoBuildPlugin, SbtGitVersioning, SbtArtifactory)
+  .enablePlugins(SbtAutoBuildPlugin, SbtArtifactory)
   .settings(
-    majorVersion := 1,
     makePublicallyAvailableOnBintray := true
   )
+  .settings(ScriptedPlugin.scriptedSettings)
   .settings(
     sbtPlugin := true,
     targetJvm := "jvm-1.7",
     organization := "uk.gov.hmrc",
-    scalaVersion := "2.10.6",
-    resolvers += Resolver.url(
-      "sbt-plugin-releases",
-      url("https://dl.bintray.com/content/sbt/sbt-plugin-releases"))(Resolver.ivyStylePatterns),
-    resolvers += "Typesafe Releases" at "http://repo.typesafe.com/typesafe/releases/",
+    scalaVersion := "2.10.7",
     libraryDependencies ++= Seq(
-      "org.apache.commons" % "commons-compress" % "1.9",
-      "org.scalatest" %% "scalatest" % "2.2.4" % "test",
-      "org.pegdown" % "pegdown" % "1.4.2" % "test"
-    )
-  ).settings(addSbtPlugin("com.typesafe.sbt" %% "sbt-native-packager" % "1.1.0"))
+      "com.typesafe.play" %% "play-json" % "2.6.13",
+      "org.scalatest" %% "scalatest" % "3.0.5" % Test,
+      "org.pegdown" % "pegdown" % "1.6.0" % Test,
+      "org.scala-lang" % "scala-compiler" % scalaVersion.value % Test,
+      "org.scala-lang" % "scala-reflect" % scalaVersion.value % Test
+    ),
+    scriptedLaunchOpts += ("-Dplugin.version=" + version.value),
+    scriptedLaunchOpts ++= sys.process.javaVmArguments.filter(
+      a => Seq("-Xmx", "-Xms", "-XX", "-Dsbt.log.noformat").exists(a.startsWith)
+    ),
+    scriptedBufferLog := false,
+    scalafmtOnCompile in Compile := true,
+    scalafmtOnCompile in Test := true
+  )
