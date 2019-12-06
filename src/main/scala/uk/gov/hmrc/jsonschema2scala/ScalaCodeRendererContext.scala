@@ -117,6 +117,7 @@ case class ScalaCodeRendererContext(
 
   val generatorsOpt: Option[Unit] = toOption(options.features.contains(JsonSchema2ScalaFeature.Generator))
   val validatorsOpt: Option[Unit] = toOption(options.features.contains(JsonSchema2ScalaFeature.Validator))
+  val playJsonOpt: Option[Unit] = toOption(options.features.contains(JsonSchema2ScalaFeature.PlayJson))
 
   def commonReference(s: String): String = commonVals.get(s).map(n => s"Common.$n").getOrElse(s)
 }

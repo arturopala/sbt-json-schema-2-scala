@@ -35,23 +35,26 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
 
     val context = ScalaCodeRendererContext(typeDef.definition, options)
 
-    val code: Seq[Option[ScalaCode]] = Seq(
-      Some(Package(options.packageName)),
-      context.generatorsOpt.map(_ => Import("org.scalacheck", List("Arbitrary", "Gen"))),
-      context.generatorsOpt.map(_ => WildcardImport("play.api.libs.json")),
-      Some(BlockComment(s"""
-                           | ---------------------------------------------------
-                           | THIS FILE HAS BEEN GENERATED - DO NOT MODIFY IT !!!
-                           |          CHANGE THE JSON SCHEMA IF NEEDED
-                           | ---------------------------------------------------
-                           | $description
-                           | Structure:
-                           |  ${generateTypesMap(typeDef)}
-        """.stripMargin))
-    ) ++ generateTypeDefinition(typeDef, isTopLevel = true, context)
+    val code: Seq[Option[ScalaCode]] = Seq(Some(Package(options.packageName))) ++
+      generateGlobalImports(context)
+    Seq(Some(BlockComment(s"""
+                             | ---------------------------------------------------
+                             | THIS FILE HAS BEEN GENERATED - DO NOT MODIFY IT !!!
+                             |          CHANGE THE JSON SCHEMA IF NEEDED
+                             | ---------------------------------------------------
+                             | $description
+                             | Structure:
+                             |  ${generateTypesMap(typeDef)}
+        """.stripMargin))) ++
+      generateTypeDefinition(typeDef, isTopLevel = true, context)
 
     code.collect(defined)
   }
+
+  def generateGlobalImports(context: ScalaCodeRendererContext): Seq[Option[ScalaCode]] =
+    Seq(
+      context.generatorsOpt.map(_ => Import("org.scalacheck", List("Arbitrary", "Gen"))),
+      context.playJsonOpt.map(_ => WildcardImport("play.api.libs.json")))
 
   def generateTypesMap(typeDef: TypeDefinition, level: Int = 1): String =
     s"${typeDef.name}${typeDef.nestedTypes
