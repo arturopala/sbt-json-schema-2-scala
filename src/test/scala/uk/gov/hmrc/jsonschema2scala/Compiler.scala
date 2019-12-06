@@ -22,6 +22,7 @@ import scala.reflect.internal.util.{BatchSourceFile, Position}
 import scala.reflect.io.AbstractFile
 import scala.tools.nsc.{Global, Settings}
 import scala.tools.nsc.reporters.AbstractReporter
+import scala.util.Random
 
 /**
   * Compiles scala code units for unit testing purposes
@@ -30,6 +31,18 @@ object Compiler {
 
   private val tempDir: Path = Files.createTempDirectory("sbt-json-schema-2-scala-test")
   private val settings = createSettings()
+
+  def compileCode(code: Seq[Code], show: Boolean = false): Unit = {
+    val name = "Test_" + Random.alphanumeric.take(10)
+    val content = Code.toString(code)
+    if (show) println(content)
+    compile(List((name, content)))
+  }
+
+  def compileSingle(code: String): Unit = {
+    val name = "Test_" + Random.alphanumeric.take(10)
+    compile(List((name, code)))
+  }
 
   /**
     * Compile code units paired with the virtual file name
@@ -49,7 +62,7 @@ object Compiler {
     run.compileSources(sources)
 
     val errors = reporter.errors.result
-    if (errors.nonEmpty) throw new CompilationError(s"${errors.size} error(s) occured :\n${errors.mkString("\n")}")
+    if (errors.nonEmpty) throw new CompilationError(s"${errors.size} error(s) occurred:\n${errors.mkString("\n")}")
   }
 
   private class CompilationReporter(val settings: Settings) extends AbstractReporter {

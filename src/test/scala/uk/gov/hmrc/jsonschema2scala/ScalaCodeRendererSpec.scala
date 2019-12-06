@@ -61,14 +61,7 @@ class ScalaCodeRendererSpec extends WordSpec with Matchers {
         """.stripMargin).as[JsObject]
       val definition = JsonSchema.read(schemaJson)
       val code = JsonSchema2ScalaCodeRenderer.render("Test", definition, options, "")
-      val result = Code.toString(code)
-      result should include("package a.b.c")
-      result should include("case class Test(")
-      result should include("aba: String")
-      result should include("`eg-dhj`: Option[BigDecimal] = None")
-      result should include("`abc-def`: Boolean  = false")
-      result should not include ("object Test {")
-      result should not include ("}")
+      Compiler.compileCode(code, show = true)
     }
 
     "process simple schema containing oneOf values" in {
@@ -111,14 +104,7 @@ class ScalaCodeRendererSpec extends WordSpec with Matchers {
         """.stripMargin).as[JsObject]
       val definition = JsonSchema.read(schemaJson)
       val code = JsonSchema2ScalaCodeRenderer.render("Test", definition, options, "")
-      val result = Code.toString(code)
-      result should include("package a.b.c")
-      result should include("case class Test(")
-      result should include("aba: Aba")
-      result should include("`eg-dhj`: Option[BigDecimal] = None")
-      result should include("`abc-def`: Boolean  = false")
-      result should include("object Test {")
-      result should include("}")
+      Compiler.compileCode(code, show = true)
     }
   }
 

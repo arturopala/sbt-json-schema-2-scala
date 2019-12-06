@@ -39,11 +39,11 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
       Some(Package(options.packageName)),
       context.generatorsOpt.map(_ => Import("org.scalacheck", List("Arbitrary", "Gen"))),
       context.generatorsOpt.map(_ => WildcardImport("play.api.libs.json")),
-      Some(WildcardImport(s"${context.packageName}.$className")),
       Some(BlockComment(s"""
-                           | ----------------------------------------------------------------------------
-                           | THIS FILE HAS BEEN GENERATED - DO NOT MODIFY IT, CHANGE THE SCHEMA IF NEEDED
-                           | ----------------------------------------------------------------------------
+                           | ---------------------------------------------------
+                           | THIS FILE HAS BEEN GENERATED - DO NOT MODIFY IT !!!
+                           |          CHANGE THE JSON SCHEMA IF NEEDED
+                           | ---------------------------------------------------
                            | $description
                            | Structure:
                            |  ${generateTypesMap(typeDef)}
@@ -274,7 +274,7 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
           members = if (context.renderBuilders) generateBuilderMethods(typeDef) else Seq.empty
         )
 
-    val objectCode = Some(
+    val objectCode =
       Object(
         name = typeDef.name,
         supertypes = if (context.renderGenerators) Seq(s"RecordUtils[${typeDef.name}]") else Seq.empty,
@@ -287,9 +287,13 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
           jsonFormatsCode,
           nestedTypesDefinitions,
           customObject).flatten.collect(defined)
-      ))
+      ).asOption
 
-    Seq(Some(classCode), objectCode)
+    val objectImport =
+      if (isTopLevel) objectCode.map(_ => WildcardImport(s"${context.packageName}.${typeDef.name}"))
+      else None
+
+    Seq(objectImport, Some(classCode), objectCode)
   }
 
   def generateClassInterfaces(typeDef: TypeDefinition): Seq[String] =
