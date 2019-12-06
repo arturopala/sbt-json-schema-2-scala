@@ -36,15 +36,15 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
     val context = ScalaCodeRendererContext(typeDef.definition, options)
 
     val code: Seq[Option[ScalaCode]] = Seq(Some(Package(options.packageName))) ++
-      generateGlobalImports(context)
-    Seq(Some(BlockComment(s"""
-                             | ---------------------------------------------------
-                             | THIS FILE HAS BEEN GENERATED - DO NOT MODIFY IT !!!
-                             |          CHANGE THE JSON SCHEMA IF NEEDED
-                             | ---------------------------------------------------
-                             | $description
-                             | Structure:
-                             |  ${generateTypesMap(typeDef)}
+      generateGlobalImports(context) ++
+      Seq(Some(BlockComment(s"""
+                               | ---------------------------------------------------
+                               | THIS FILE HAS BEEN GENERATED - DO NOT MODIFY IT !!!
+                               |          CHANGE THE JSON SCHEMA IF NEEDED
+                               | ---------------------------------------------------
+                               | $description
+                               | Structure:
+                               |  ${generateTypesMap(typeDef)}
         """.stripMargin))) ++
       generateTypeDefinition(typeDef, isTopLevel = true, context)
 

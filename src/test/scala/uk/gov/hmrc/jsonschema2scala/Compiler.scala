@@ -16,12 +16,13 @@
 
 package uk.gov.hmrc.jsonschema2scala
 
+import java.net.URLClassLoader
 import java.nio.file.{Files, Path}
 
 import scala.reflect.internal.util.{BatchSourceFile, Position}
 import scala.reflect.io.AbstractFile
-import scala.tools.nsc.{Global, Settings}
 import scala.tools.nsc.reporters.AbstractReporter
+import scala.tools.nsc.{Global, Settings}
 import scala.util.Random
 
 /**
@@ -30,39 +31,49 @@ import scala.util.Random
 object Compiler {
 
   private val tempDir: Path = Files.createTempDirectory("sbt-json-schema-2-scala-test")
-  private val settings = createSettings()
+  private val outputDir: Path = tempDir.resolve("classes")
+  Files.createDirectory(outputDir)
+  private val settings = createSettings(outputDir)
 
-  def compileCode(code: Seq[Code], show: Boolean = false): Unit = {
+  def compileCode(code: Seq[Code], verbose: Boolean = false): Either[Seq[String], ClassLoader] = {
     val name = "Test_" + Random.alphanumeric.take(10)
     val content = Code.toString(code)
-    if (show) println(content)
-    compile(List((name, content)))
+    if (verbose) println(content)
+    compile(List((name, content)), verbose)
   }
 
-  def compileSingle(code: String): Unit = {
+  def compileSingle(sourceCode: String, verbose: Boolean = false): Either[Seq[String], ClassLoader] = {
     val name = "Test_" + Random.alphanumeric.take(10)
-    compile(List((name, code)))
+    compile(List((name, sourceCode)), verbose)
   }
 
   /**
     * Compile code units paired with the virtual file name
     */
-  def compile(codeUnits: List[(String, String)]): Unit = {
+  def compile(sourceCodeUnits: List[(String, String)], verbose: Boolean = false): Either[Seq[String], ClassLoader] = {
 
     val reporter = new CompilationReporter(settings)
     val global = new Global(settings, reporter)
     val run = new global.Run
 
-    val sources = codeUnits.map {
-      case (path, content) =>
+    val sources = sourceCodeUnits.map {
+      case (path, sourceCode) =>
         val file = Files.createTempFile(tempDir, path, ".scala")
-        new BatchSourceFile(AbstractFile.getFile(file.toAbsolutePath.toString), content.toCharArray)
+        new BatchSourceFile(AbstractFile.getFile(file.toAbsolutePath.toString), sourceCode.toCharArray)
     }
 
     run.compileSources(sources)
 
-    val errors = reporter.errors.result
-    if (errors.nonEmpty) throw new CompilationError(s"${errors.size} error(s) occurred:\n${errors.mkString("\n")}")
+    val errors: Seq[String] = reporter.errors.result
+    if (errors.nonEmpty) {
+      if (verbose) println(s"Compilation error(s) occurred [${errors.size}]:\n${errors.mkString("\n")}")
+      Left(errors)
+    } else {
+      if (verbose) println("Compilation succeeded.")
+      val classLoader: ClassLoader = new URLClassLoader(Array(outputDir.toUri.toURL), this.getClass.getClassLoader)
+      Right(classLoader)
+    }
+
   }
 
   private class CompilationReporter(val settings: Settings) extends AbstractReporter {
@@ -80,7 +91,8 @@ object Compiler {
 
   class CompilationError(msg: String) extends RuntimeException(msg)
 
-  private def createSettings(): Settings = {
+  private def createSettings(outputDir: Path): Settings = {
+
     val settings = new Settings(s => {
       sys.error("errors report: " + s)
     })
@@ -94,6 +106,7 @@ object Compiler {
     settings.bootclasspath.value = classpath.distinct.mkString(java.io.File.pathSeparator)
     settings.classpath.value = classpath.distinct.mkString(java.io.File.pathSeparator)
     settings.embeddedDefaults(classLoader)
+    settings.outputDirs.setSingleOutput(AbstractFile.getDirectory(outputDir.toFile))
     settings
   }
 
