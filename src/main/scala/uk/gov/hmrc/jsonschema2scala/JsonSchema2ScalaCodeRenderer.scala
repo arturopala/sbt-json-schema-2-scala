@@ -64,173 +64,49 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
     isTopLevel: Boolean,
     context: ScalaCodeRendererContext): Seq[Option[ScalaCode]] = {
 
-    lazy val classFields = generateClassFields(typeDef)
-    lazy val propertyValidators = generatePropertyValidators(typeDef.definition, context)
-    lazy val objectValidator = generateObjectValidator(typeDef.definition, context)
-    lazy val fieldGenerators = generateFieldGenerators(typeDef.definition, context)
-    lazy val fieldsInitialization = generateGenFieldsInitialization(typeDef.definition)
-    lazy val sanitizers = generateSanitizers(typeDef.definition, context)
-    lazy val sanitizerList = generateSanitizerList(typeDef.definition)
-    lazy val customObject = if (isTopLevel) generateCustomObjectDeclaration(context) else Seq.empty
+    lazy val classFields: Seq[Param] =
+      generateClassFields(typeDef)
+
+    lazy val propertyValidators: Seq[Option[ScalaCode]] =
+      generatePropertyValidators(typeDef.definition, context)
+
+    lazy val objectValidator: String =
+      generateObjectValidator(typeDef.definition, context)
+
+    lazy val fieldGenerators: String =
+      generateFieldGenerators(typeDef.definition, context)
+
+    lazy val fieldsInitialization: String =
+      generateGenFieldsInitialization(typeDef.definition)
+
+    lazy val sanitizers: Seq[Option[ScalaCode]] =
+      generateSanitizers(typeDef.definition, context)
+
+    lazy val sanitizerList: String =
+      generateSanitizerList(typeDef.definition)
+
+    lazy val customObject: Seq[Option[ScalaCode]] =
+      if (isTopLevel) generateCustomObjectDeclaration(context) else Seq.empty
+
     lazy val nestedTypesDefinitions: Seq[Option[ScalaCode]] = typeDef.nestedTypes
       .filter(!_.definition.isRef || isTopLevel)
       .flatMap(t => generateTypeDefinition(t, isTopLevel = false, context))
 
     lazy val objectMembersCode: Seq[Option[ScalaCode]] = if (isTopLevel) {
-      Seq(
-        context.validatorsOpt.map(_ => WildcardImport("Validator")),
-        context.generatorsOpt.map(_ => WildcardImport("Generator.GenOps")),
-        context.generatorsOpt.map(_ =>
-          ValueDefinition("arbitrary", "Arbitrary[Char]", Seq("Arbitrary(Gen.alphaNumChar)"), Some("implicit"))),
-        context.generatorsOpt.map(
-          _ =>
-            ValueDefinition(
-              name = "recordType",
-              returnType = s"RecordMetaData[${typeDef.name}]",
-              body = Seq(s"RecordMetaData[${typeDef.name}](this)"),
-              modifier = Some("implicit"))),
-        context.generatorsOpt.flatMap(
-          _ =>
-            context.uniqueKey.map(
-              key =>
-                MethodDefinition(
-                  name = "uniqueKey",
-                  parameters = Seq(Param("key", "String")),
-                  returnType = "String",
-                  body = Seq(quoted(s"${key._2}:$${key.toUpperCase}")))))
-      ) ++ (if (context.renderGenerators)
-              context.keys.map(
-                key =>
-                  Some(
-                    MethodDefinition(
-                      name = s"${key._2}Key",
-                      parameters = Seq(Param("key", "String")),
-                      returnType = "String",
-                      body = Seq(quoted(s"${key._2}:$${key.toUpperCase}")))))
-            else Seq.empty)
+      generateObjectMembers(typeDef, context)
     } else Seq.empty
 
     lazy val generatorsCode: Seq[Option[ScalaCode]] =
-      Seq(
-        context.generatorsOpt.map(_ =>
-          ValueDefinition(
-            name = "gen",
-            returnType = s"Gen[${typeDef.name}]",
-            body = Seq(
-              if (typeDef.isInterface)
-                s"Gen.oneOf[${typeDef.name}](${typeDef.subtypes
-                  .map(st => s"${st.name}.gen.map(_.asInstanceOf[${typeDef.name}])")
-                  .mkString(",\n  ")})"
-              else if (fieldGenerators.isEmpty)
-                s"Gen const ${typeDef.name}($fieldsInitialization)"
-              else
-                s"""for {
-                   |    $fieldGenerators
-                   |  } yield ${typeDef.name}($fieldsInitialization)""".stripMargin),
-            modifier = Some("override")
-        )))
+      generateGenerators(typeDef, fieldGenerators, fieldsInitialization, context)
 
     lazy val validatorCode: Seq[Option[ScalaCode]] =
-      Seq(
-        context.validatorsOpt.map(_ =>
-          ValueDefinition(
-            name = "validate",
-            returnType = s"Validator[${typeDef.name}]",
-            body = Seq(if (typeDef.isInterface && typeDef.subtypes.nonEmpty)
-              s"{${typeDef.subtypes
-                .map(subTypeDef => s"""case x: ${subTypeDef.name}   => ${subTypeDef.name}.validate(x)""")
-                .mkString("\n    ")}}"
-            else s"Validator($objectValidator)"),
-            modifier = context.generatorsOpt.map(_ => "override")
-        )))
+      generateValidator(typeDef, objectValidator, context)
 
     lazy val sanitizersCode: Seq[Option[ScalaCode]] =
-      if (context.renderSanitizer) {
-        if (typeDef.isInterface && typeDef.subtypes.nonEmpty)
-          Seq(
-            Some(
-              ValueDefinition(
-                name = "sanitizer",
-                returnType = "Update",
-                body = Seq(s"""seed => {${typeDef.subtypes
-                  .map(subTypeDef => s"""  case x: ${subTypeDef.name}   => ${subTypeDef.name}.sanitize(seed)(x)""")
-                  .mkString("\n")}}""")
-              )),
-            Some(
-              ValueDefinition(
-                name = "sanitizers",
-                returnType = "Seq[Update]",
-                body = Seq(s"Seq(sanitizer)")
-              ))
-          )
-        else
-          sanitizers ++ Seq(
-            Some(
-              ValueDefinition(
-                name = "sanitizers",
-                returnType = "Update",
-                body = Seq(s"Seq($sanitizerList)"),
-                modifier = Some("override"))))
-      } else Seq()
+      generateSanitizers(typeDef, sanitizers, sanitizerList, context)
 
     lazy val jsonFormatsCode: Seq[Option[ScalaCode]] =
-      if (!context.renderPlayJson) Seq.empty
-      else if (typeDef.isInterface)
-        Seq(
-          Some(
-            ValueDefinition(
-              name = "reads",
-              returnType = s"Reads[${typeDef.name}]",
-              body = Seq(
-                s"""new Reads[${typeDef.name}] {
-                   |      override def reads(json: JsValue): JsResult[${typeDef.name}] = {
-                   |      ${typeDef.subtypes.zipWithIndex
-                     .map {
-                       case (subTypeDef, i) =>
-                         s"""  val r$i = ${if (i > 0) s"r${i - 1}.orElse(" else ""}${subTypeDef.name}.formats.reads(json).flatMap(e => ${subTypeDef.name}.validate(e).fold(_ => JsError(), _ => JsSuccess(e)))${if (i > 0)
-                           ")"
-                         else ""}"""
-                     }
-                     .mkString("\n  ")}
-                   |        r${typeDef.subtypes.size - 1}.orElse(aggregateErrors(JsError("Could not match json object to any variant of ${typeDef.name}, i.e. ${typeDef.subtypes
-                     .map(_.name)
-                     .mkString(", ")}"),${(for (i <- typeDef.subtypes.indices)
-                     yield s"r$i").mkString(",")}))
-                   |      }
-                   |
-                   |      private def aggregateErrors[T](errors: JsResult[T]*): JsError =
-                   |        errors.foldLeft(JsError())((a, r) =>
-                   |          r match {
-                   |            case e: JsError => JsError(a.errors ++ e.errors)
-                   |            case _          => a
-                   |        })
-                   |  }""".stripMargin),
-              modifier = Some("implicit")
-            )),
-          Some(
-            ValueDefinition(
-              name = "writes",
-              returnType = s"Writes[${typeDef.name}]",
-              body =
-                Seq(s"""new Writes[${typeDef.name}] {
-                       |    override def writes(o: ${typeDef.name}): JsValue = o match {
-                       |      ${typeDef.subtypes
-                         .map(subTypeDef => s"""case x: ${subTypeDef.name}   => ${subTypeDef.name}.formats.writes(x)""")
-                         .mkString("\n    ")}
-                       |    }
-                       |  }
-          """.stripMargin),
-              modifier = Some("implicit")
-            ))
-        )
-      else
-        Seq(
-          Some(
-            ValueDefinition(
-              name = "formats",
-              returnType = s"Format[${typeDef.name}]",
-              body = Seq("Json.format[${typeDef.name}]"),
-              modifier = Some("implicit"))))
+      generateJsonFormats(typeDef, context)
 
     // -----------------------------------------
     //    CASE CLASS AND OBJECT TEMPLATE
@@ -295,6 +171,39 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
 
     Seq(objectImport, Some(classCode), objectCode)
   }
+
+  def generateObjectMembers(typeDef: TypeDefinition, context: ScalaCodeRendererContext): Seq[Option[ScalaCode]] =
+    Seq(
+      context.validatorsOpt.map(_ => WildcardImport("Validator")),
+      context.generatorsOpt.map(_ => WildcardImport("Generator.GenOps")),
+      context.generatorsOpt.map(_ =>
+        ValueDefinition("arbitrary", "Arbitrary[Char]", Seq("Arbitrary(Gen.alphaNumChar)"), Some("implicit"))),
+      context.generatorsOpt.map(
+        _ =>
+          ValueDefinition(
+            name = "recordType",
+            returnType = s"RecordMetaData[${typeDef.name}]",
+            body = Seq(s"RecordMetaData[${typeDef.name}](this)"),
+            modifier = Some("implicit"))),
+      context.generatorsOpt.flatMap(
+        _ =>
+          context.uniqueKey.map(
+            key =>
+              MethodDefinition(
+                name = "uniqueKey",
+                parameters = Seq(Param("key", "String")),
+                returnType = "String",
+                body = Seq(quoted(s"${key._2}:$${key.toUpperCase}")))))
+    ) ++ (if (context.renderGenerators)
+            context.keys.map(
+              key =>
+                Some(
+                  MethodDefinition(
+                    name = s"${key._2}Key",
+                    parameters = Seq(Param("key", "String")),
+                    returnType = "String",
+                    body = Seq(quoted(s"${key._2}:$${key.toUpperCase}")))))
+          else Seq.empty)
 
   def generateClassInterfaces(typeDef: TypeDefinition): Seq[String] =
     if (typeDef.interfaces.isEmpty) Seq.empty
@@ -701,11 +610,146 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
     case _ => ""
   }
 
+  def generateGenerators(
+    typeDef: TypeDefinition,
+    fieldGenerators:      => String,
+    fieldsInitialization: => String,
+    context: ScalaCodeRendererContext): Seq[Option[ValueDefinition]] =
+    Seq(
+      context.generatorsOpt.map(_ =>
+        ValueDefinition(
+          name = "gen",
+          returnType = s"Gen[${typeDef.name}]",
+          body = Seq(
+            if (typeDef.isInterface)
+              s"Gen.oneOf[${typeDef.name}](${typeDef.subtypes
+                .map(st => s"${st.name}.gen.map(_.asInstanceOf[${typeDef.name}])")
+                .mkString(",\n  ")})"
+            else if (fieldGenerators.isEmpty)
+              s"Gen const ${typeDef.name}($fieldsInitialization)"
+            else
+              s"""for {
+                 |    $fieldGenerators
+
+                 |  } yield ${typeDef.name}($fieldsInitialization)""".stripMargin),
+          modifier = Some("override")
+      )))
+
+  def generateValidator(
+    typeDef: TypeDefinition,
+    objectValidator: => String,
+    context: ScalaCodeRendererContext
+  ): Seq[Option[ValueDefinition]] =
+    Seq(
+      context.validatorsOpt.map(_ =>
+        ValueDefinition(
+          name = "validate",
+          returnType = s"Validator[${typeDef.name}]",
+          body = Seq(if (typeDef.isInterface && typeDef.subtypes.nonEmpty)
+            s"{${typeDef.subtypes
+              .map(subTypeDef => s"""case x: ${subTypeDef.name}   => ${subTypeDef.name}.validate(x)""")
+              .mkString("\n    ")}}"
+          else s"Validator($objectValidator)"),
+          modifier = context.generatorsOpt.map(_ => "override")
+      )))
+
+  def generateSanitizers(
+    typeDef: TypeDefinition,
+    sanitizers:    => Seq[Option[ScalaCode]],
+    sanitizerList: => String,
+    context: ScalaCodeRendererContext): Seq[Option[ScalaCode]] =
+    if (context.renderSanitizer) {
+      if (typeDef.isInterface && typeDef.subtypes.nonEmpty)
+        Seq(
+          Some(
+            ValueDefinition(
+              name = "sanitizer",
+              returnType = "Update",
+              body = Seq(s"""seed => {${typeDef.subtypes
+                .map(subTypeDef => s"""  case x: ${subTypeDef.name}   => ${subTypeDef.name}.sanitize(seed)(x)""")
+                .mkString("\n")}}""")
+            )),
+          Some(
+            ValueDefinition(
+              name = "sanitizers",
+              returnType = "Seq[Update]",
+              body = Seq(s"Seq(sanitizer)")
+            ))
+        )
+      else
+        sanitizers ++ Seq(
+          Some(
+            ValueDefinition(
+              name = "sanitizers",
+              returnType = "Update",
+              body = Seq(s"Seq($sanitizerList)"),
+              modifier = Some("override"))))
+    } else Seq()
+
   def generateCustomObjectDeclaration(context: ScalaCodeRendererContext): Seq[Option[ScalaCode]] =
     if (context.commonVals.isEmpty) Seq.empty
     else
       Seq(Some(Object(name = "Common", supertypes = Seq.empty, members = context.commonVals.map {
         case (value, name) => ValueDefinition(name = name, returnType = null, body = Seq(value))
       }.toSeq)))
+
+  def generateJsonFormats(typeDef: TypeDefinition, context: ScalaCodeRendererContext): Seq[Option[ScalaCode]] =
+    if (!context.renderPlayJson) Seq.empty
+    else if (typeDef.isInterface)
+      Seq(
+        Some(
+          ValueDefinition(
+            name = "reads",
+            returnType = s"Reads[${typeDef.name}]",
+            body = Seq(
+              s"""new Reads[${typeDef.name}] {
+                 |      override def reads(json: JsValue): JsResult[${typeDef.name}] = {
+                 |      ${typeDef.subtypes.zipWithIndex
+                   .map {
+                     case (subTypeDef, i) =>
+                       s"""  val r$i = ${if (i > 0) s"r${i - 1}.orElse(" else ""}${subTypeDef.name}.formats.reads(json).flatMap(e => ${subTypeDef.name}.validate(e).fold(_ => JsError(), _ => JsSuccess(e)))${if (i > 0)
+                         ")"
+                       else ""}"""
+                   }
+                   .mkString("\n  ")}
+                 |        r${typeDef.subtypes.size - 1}.orElse(aggregateErrors(JsError("Could not match json object to any variant of ${typeDef.name}, i.e. ${typeDef.subtypes
+                   .map(_.name)
+                   .mkString(", ")}"),${(for (i <- typeDef.subtypes.indices)
+                   yield s"r$i").mkString(",")}))
+                 |      }
+                 |
+                 |      private def aggregateErrors[T](errors: JsResult[T]*): JsError =
+                 |        errors.foldLeft(JsError())((a, r) =>
+                 |          r match {
+                 |            case e: JsError => JsError(a.errors ++ e.errors)
+                 |            case _          => a
+                 |        })
+                 |  }""".stripMargin),
+            modifier = Some("implicit")
+          )),
+        Some(
+          ValueDefinition(
+            name = "writes",
+            returnType = s"Writes[${typeDef.name}]",
+            body =
+              Seq(s"""new Writes[${typeDef.name}] {
+                     |    override def writes(o: ${typeDef.name}): JsValue = o match {
+                     |      ${typeDef.subtypes
+                       .map(subTypeDef => s"""case x: ${subTypeDef.name}   => ${subTypeDef.name}.formats.writes(x)""")
+                       .mkString("\n    ")}
+                     |    }
+                     |  }
+          """.stripMargin),
+            modifier = Some("implicit")
+          ))
+      )
+    else
+      Seq(
+        Some(
+          ValueDefinition(
+            name = "formats",
+            returnType = s"Format[${typeDef.name}]",
+            body = Seq("Json.format[${typeDef.name}]"),
+            modifier = Some("implicit"))))
 
 }
