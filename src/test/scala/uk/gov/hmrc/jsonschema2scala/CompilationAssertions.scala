@@ -13,7 +13,7 @@ trait CompilationAssertions {
     Compiler
       .compileCode(sourceCodeUnits, verbose = true)
       .fold(
-        errors => fail(errors.mkString),
+        errors => fail(s"Compilation of the source code has failed with ${errors.size} error(s)"),
         cl => assertions.foreach(_.assert(cl))
       )
 

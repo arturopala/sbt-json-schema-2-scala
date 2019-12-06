@@ -66,7 +66,7 @@ object Compiler {
 
     val errors: Seq[String] = reporter.errors.result
     if (errors.nonEmpty) {
-      if (verbose) println(s"Compilation error(s) occurred [${errors.size}]:\n${errors.mkString("\n")}")
+      if (verbose) sys.error(s"Compilation error(s) occurred [${errors.size}]:\n${errors.mkString("\n")}")
       Left(errors)
     } else {
       if (verbose) println("Compilation succeeded.")

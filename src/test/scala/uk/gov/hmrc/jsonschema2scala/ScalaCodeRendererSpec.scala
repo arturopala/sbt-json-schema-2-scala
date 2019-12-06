@@ -33,29 +33,8 @@ package uk.gov.hmrc.jsonschema2scala
  */
 
 import org.scalatest.{Matchers, WordSpec}
-import play.api.libs.json.{JsObject, Json}
 
-class ScalaCodeRendererSpec extends WordSpec with Matchers with CompilationAssertions {
-
-  def assertCanParseAndCompile(schema: String): Unit =
-    assertCanParseAndCompile(schema, "a.b.c", "Test")
-
-  def assertCanParseAndCompile(schema: String, packageName: String, className: String): Unit = {
-    val options = JsonSchema2ScalaOptions(features = Set(), packageName = packageName)
-    val schemaJson = Json.parse(schema).as[JsObject]
-    val definition = JsonSchema.read(schemaJson)
-    val code = JsonSchema2ScalaCodeRenderer.render(className, definition, options, "")
-    assertCompiles(code, ClassAssertion(s"$packageName.$className"))
-  }
-
-  def assertRenderingFails(schema: String): Unit = {
-    val options = JsonSchema2ScalaOptions(features = Set(), packageName = "a.b.c")
-    val schemaJson = Json.parse(schema).as[JsObject]
-    val definition = JsonSchema.read(schemaJson)
-    an[Exception] shouldBe thrownBy {
-      JsonSchema2ScalaCodeRenderer.render("Test", definition, options, "")
-    }
-  }
+class ScalaCodeRendererSpec extends WordSpec with Matchers with CodeRenderingAssertions with TestSchemas {
 
   "JsonSchema2ScalaCodeRenderer" should {
     "fail rendering simple schema of primitive type" in
@@ -125,6 +104,10 @@ class ScalaCodeRendererSpec extends WordSpec with Matchers with CompilationAsser
                                  |  "required": [ "aba" ]
                                  |}
                                """.stripMargin)
+
+    testSchemas.foreach { schema: JsonSchema.Schema =>
+      s"render ${schema.className} schema" in assertCanParseAndCompile(schema, testReferences)
+    }
   }
 
 }

@@ -43,12 +43,12 @@ object JsonSchema {
       })
       .collect { case Some(x) => x }
       .toMap
-    schemas.map(s => read(s.body, externalReferences ++ references))
+    schemas.map(s => read(s.content, externalReferences ++ references))
   }
 
   sealed trait Schema {
     def className: String
-    def body: JsObject
+    def content: JsObject
     def id: Option[String]
   }
 
@@ -63,7 +63,7 @@ object JsonSchema {
         .mkString
     }
 
-    val body: JsObject = {
+    val content: JsObject = {
       val source: Source = Source.fromFile(file, "utf-8")
       val json = Try(Json.parse(source.mkString).as[JsObject])
       source.close()
@@ -73,11 +73,11 @@ object JsonSchema {
       }
     }
 
-    val id: Option[String] = (body \ "$id").asOpt[String]
+    val id: Option[String] = (content \ "$id").asOpt[String]
   }
 
   case class SchemaResource(inputStream: InputStream, className: String) extends Schema {
-    val body: JsObject = {
+    val content: JsObject = {
       val source: Source = Source.fromInputStream(inputStream, "utf-8")
       val json = Try(Json.parse(source.mkString).as[JsObject])
       Try(source.close())
@@ -87,7 +87,7 @@ object JsonSchema {
       }
     }
 
-    val id: Option[String] = (body \ "$id").asOpt[String]
+    val id: Option[String] = (content \ "$id").asOpt[String]
   }
 
   sealed trait Definition {
@@ -192,7 +192,7 @@ object JsonSchema {
   case class ExternalDefinition(name: String, path: String, ref: String, schema: Schema, required: Seq[String])
       extends Definition {
     override val isRef: Boolean = true
-    override val isPrimitive: Boolean = (schema.body \ "type").asOpt[String] match {
+    override val isPrimitive: Boolean = (schema.content \ "type").asOpt[String] match {
       case Some(valueType) =>
         valueType match {
           case "object"  => false
@@ -204,10 +204,10 @@ object JsonSchema {
       case None => false
     }
     override def isMandatory: Boolean = required.contains(name)
-    override val description: Option[String] = (schema.body \ "description").asOpt[String]
+    override val description: Option[String] = (schema.content \ "description").asOpt[String]
     override def shallBeValidated: Boolean = true
 
-    def `type`: Option[String] = (schema.body \ "type").asOpt[String]
+    def `type`: Option[String] = (schema.content \ "type").asOpt[String]
   }
 
   private def readProperty(
