@@ -18,7 +18,7 @@ package uk.gov.hmrc.jsonschema2scala
 
 import java.io.{File, InputStream}
 
-import play.api.libs.json.{JsArray, JsLookup, JsObject, Json}
+import play.api.libs.json.{JsArray, JsLookup, JsObject, JsValue, Json}
 
 import scala.io.Source
 import scala.util.{Failure, Success, Try}
@@ -346,15 +346,21 @@ object JsonSchema {
         val props = properties.fields
           .map(_._1)
           .distinct
-          .map(
-            p =>
-              readProperty(
-                p,
-                s"$path/$p",
-                (property \ "properties" \ p).as[JsObject],
-                schema,
-                required = required,
-                externalSchemas = externalDefinitions))
+          .map(name => {
+            (property \ "properties" \ name).as[JsValue] match {
+              case fieldProperty: JsObject =>
+                readProperty(
+                  name = name,
+                  path = s"$path/$name",
+                  property = fieldProperty,
+                  schema = schema,
+                  required = required,
+                  externalSchemas = externalDefinitions)
+              case other =>
+                throw new IllegalArgumentException(
+                  s"Expected property definition $path/$name to be a JsObject but got ${other.getClass.getSimpleName}, check your schema!")
+            }
+          })
         ObjectDefinition(
           name,
           path,

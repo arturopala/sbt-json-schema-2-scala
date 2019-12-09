@@ -16,9 +16,16 @@
 
 package uk.gov.hmrc.jsonschema2scala
 
-import org.scalatest.{Matchers, WordSpec}
+import java.nio.file.Paths
 
-class CompilerSpec extends WordSpec with Matchers {
+import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpec}
+
+class CompilerSpec extends WordSpec with Matchers with BeforeAndAfterAll {
+
+  implicit val compiler = Compiler()
+
+  override def afterAll(): Unit =
+    compiler.cleanup()
 
   "Compiler" should {
     "compile single scala object definition" in {
@@ -27,7 +34,13 @@ class CompilerSpec extends WordSpec with Matchers {
           |object A
           """.stripMargin
 
-      Compiler.compile(List(("A", code)))
+      compiler
+        .compile(List((Paths.get("A.scala"), code)))
+        .fold(
+          e => throw new Exception(e.mkString(",")),
+          cl => cl.loadClass("A")
+        )
+
     }
 
     "compile single scala class definition" in {
@@ -40,7 +53,15 @@ class CompilerSpec extends WordSpec with Matchers {
           |}
         """.stripMargin
 
-      Compiler.compile(List(("BC", code)))
+      compiler
+        .compile(List((Paths.get("BC.scala"), code)))
+        .fold(
+          e => throw new Exception(e.mkString(",")),
+          cl => {
+            cl.loadClass("B")
+            cl.loadClass("C")
+          }
+        )
     }
 
     "compile multiple scala definitions" in {
@@ -73,7 +94,17 @@ class CompilerSpec extends WordSpec with Matchers {
           |}
         """.stripMargin
 
-      Compiler.compile(List(("Square", square), ("Board", board), ("Test", test)))
+      compiler
+        .compile(
+          List((Paths.get("Square.scala"), square), (Paths.get("Board.scala"), board), (Paths.get("Test.scala"), test)))
+        .fold(
+          e => throw new Exception(e.mkString(",")),
+          cl => {
+            cl.loadClass("Square")
+            cl.loadClass("Board")
+            cl.loadClass("Test$")
+          }
+        )
     }
 
   }

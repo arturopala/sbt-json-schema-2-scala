@@ -36,6 +36,8 @@ trait JsonSchema2CodeRenderer {
 
   def typeName(definition: Definition): String
 
+  def typeOf(definition: Definition, prefix: String, wrapOption: Boolean = true, defaultValue: Boolean = true): String
+
   def render(
     className: String,
     typeDef: TypeDefinition,
@@ -83,52 +85,55 @@ trait JsonSchema2CodeRenderer {
         nestedTypes = typeDef.nestedTypes.filter(!_.definition.isRef).map(removeNestedRefTypes)
       )
 
-  private def typeDefinition(name: String, definition: ObjectDefinition, prefix: String = ""): TypeDefinition =
-    TypeDefinition(
-      name,
-      definition,
-      definition.properties.collect {
-        case od: ObjectDefinition => Seq(typeDefinition(typeName(od), od, s"${typeName(od)}."))
-        case oneOf: OneOfDefinition if oneOf.variants.collect { case _: ObjectDefinition => }.nonEmpty =>
-          val subtypes = oneOf.variants
-            .collect { case o: ObjectDefinition => o }
-            .zipWithIndex
+  private def typeDefinition(name: String, definition: ObjectDefinition, prefix: String = ""): TypeDefinition = {
+    val nestedTypes: Seq[TypeDefinition] = definition.properties.collect {
+      case od: ObjectDefinition => Seq(typeDefinition(typeName(od), od, s"${typeName(od)}."))
+      case oneOf: OneOfDefinition if oneOf.variants.collect { case _: ObjectDefinition => }.nonEmpty =>
+        val objects = oneOf.variants.collect { case o: ObjectDefinition => o }
+        if (objects.size == 1) {
+          val od: ObjectDefinition = objects.head
+          Seq(typeDefinition(typeName(od), od, s"${typeName(od)}."))
+        } else {
+          val subtypes = objects.zipWithIndex
             .map {
               case (od2, pos) => {
                 val name = if (typeName(od2) == typeName(oneOf)) s"${typeName(od2)}_$pos" else typeName(od2)
                 typeDefinition(name, od2, s"$name.")
               }
             }
-          if (subtypes.size <= 1) subtypes
-          else {
-            // New artificial interface type to span over multiple oneOf variants
-            //val isRef = oneOf.isRef || subtypes.exists(_.definition.isRef)
-            val superType = TypeDefinition(
-              typeName(oneOf),
-              ObjectDefinition(
-                oneOf.name,
-                oneOf.path,
-                Seq.empty,
-                Seq.empty,
-                oneOf.isRef,
-                oneOf.description,
-                oneOf.isMandatory),
-              prefix = if (oneOf.isRef) "" else prefix,
-              isInterface = true,
-              interfaceMethods = findInterfaceMethods(subtypes)
-            )
-            val subtypes2 = subtypes.map(s => s.copy(interfaces = s.interfaces :+ superType))
-            Seq(superType.copy(subtypes = subtypes2, nestedTypes = subtypes2))
-          }
-        case a: ArrayDefinition if a.item.isInstanceOf[ObjectDefinition] =>
-          Seq(
-            typeDefinition(
-              typeName(a.item.asInstanceOf[ObjectDefinition]),
-              a.item.asInstanceOf[ObjectDefinition],
-              s"${typeName(a.item.asInstanceOf[ObjectDefinition])}."))
-      }.flatten,
+          // New artificial interface type to span over multiple oneOf variants
+          //val isRef = oneOf.isRef || subtypes.exists(_.definition.isRef)
+          val superType = TypeDefinition(
+            typeName(oneOf),
+            ObjectDefinition(
+              oneOf.name,
+              oneOf.path,
+              Seq.empty,
+              Seq.empty,
+              oneOf.isRef,
+              oneOf.description,
+              oneOf.isMandatory),
+            prefix = if (oneOf.isRef) "" else prefix,
+            isInterface = true,
+            interfaceMethods = findInterfaceMethods(subtypes)
+          )
+          val subtypes2 = subtypes.map(s => s.copy(interfaces = s.interfaces :+ superType))
+          Seq(superType.copy(subtypes = subtypes2, nestedTypes = subtypes2))
+        }
+      case a: ArrayDefinition if a.item.isInstanceOf[ObjectDefinition] =>
+        Seq(
+          typeDefinition(
+            typeName(a.item.asInstanceOf[ObjectDefinition]),
+            a.item.asInstanceOf[ObjectDefinition],
+            s"${typeName(a.item.asInstanceOf[ObjectDefinition])}."))
+    }.flatten
+    TypeDefinition(
+      name,
+      definition,
+      nestedTypes,
       prefix
     )
+  }
 
   private def findInterfaceMethods(subtypes: Seq[TypeDefinition]): Set[(String, String)] =
     subtypes
@@ -138,36 +143,6 @@ trait JsonSchema2CodeRenderer {
         case _                   => Set.empty[(String, String)]
       }
       .reduce[Set[(String, String)]]((a, b) => a.intersect(b))
-
-  protected def typeOf(
-    definition: Definition,
-    prefix: String,
-    wrapOption: Boolean = true,
-    defaultValue: Boolean = true): String = {
-    val name = definition match {
-      case _: StringDefinition  => "String"
-      case _: NumberDefinition  => "BigDecimal"
-      case _: BooleanDefinition => "Boolean"
-      case a: ArrayDefinition   => s"Seq[${typeOf(a.item, prefix, wrapOption, defaultValue)}]"
-      case o: ObjectDefinition  => s"${if (o.isRef) "" else prefix}${typeName(o)}"
-      case o: OneOfDefinition =>
-        if (o.variants.isEmpty) "Nothing"
-        else if (o.variants.size == 1) typeOf(o.variants.head, prefix, wrapOption = false)
-        else
-          s"${if (o.isRef) "" else prefix}${typeName(o)}"
-      case e: ExternalDefinition =>
-        e.`type` match {
-          case Some("object")  => s"${if (e.isRef) "" else prefix}${typeName(e)}"
-          case Some("string")  => "String"
-          case Some("number")  => "BigDecimal"
-          case Some("boolean") => "Boolean"
-          case Some(t)         => throw new Exception(s"Unsupported reference type $t")
-          case None            => throw new Exception(s"Missing reference type")
-        }
-    }
-    if (!definition.isMandatory && wrapOption) s"Option[$name]${if (defaultValue) " = None" else ""}"
-    else { s"""$name ${if (defaultValue && definition.isBoolean) " = false" else ""}""" }
-  }
 
   def calculateExternalImports(definition: JsonSchema.ObjectDefinition): Set[String] =
     definition.properties.flatMap {

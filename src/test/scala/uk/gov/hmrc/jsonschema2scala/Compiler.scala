@@ -16,65 +16,136 @@
 
 package uk.gov.hmrc.jsonschema2scala
 
+import java.io.IOException
 import java.net.URLClassLoader
-import java.nio.file.{Files, Path}
+import java.nio.file._
+import java.nio.file.attribute.BasicFileAttributes
 
 import scala.reflect.internal.util.{BatchSourceFile, Position}
 import scala.reflect.io.AbstractFile
 import scala.tools.nsc.reporters.AbstractReporter
 import scala.tools.nsc.{Global, Settings}
-import scala.util.Random
+
+trait Compiler {
+
+  def compile(sourceCodeUnits: List[(Path, String)], verbose: Boolean = false): Either[Seq[String], ClassLoader]
+  def cleanup(): Unit
+
+  def compileCode(path: Path, code: Seq[Code], verbose: Boolean = false): Either[Seq[String], ClassLoader] = {
+    val content = Code.toString(code)
+    if (verbose) println(content)
+    compile(List((path, content)), verbose)
+  }
+
+  def compileSingle(path: Path, sourceCode: String, verbose: Boolean = false): Either[Seq[String], ClassLoader] =
+    compile(List((path, sourceCode)), verbose)
+}
 
 /**
   * Compiles scala code units for unit testing purposes
   */
 object Compiler {
 
-  private val tempDir: Path = Files.createTempDirectory("sbt-json-schema-2-scala-test")
-  private val outputDir: Path = tempDir.resolve("classes")
-  Files.createDirectory(outputDir)
-  private val settings = createSettings(outputDir)
+  def apply(): Compiler = new Compiler {
 
-  def compileCode(code: Seq[Code], verbose: Boolean = false): Either[Seq[String], ClassLoader] = {
-    val name = "Test_" + Random.alphanumeric.take(10)
-    val content = Code.toString(code)
-    if (verbose) println(content)
-    compile(List((name, content)), verbose)
-  }
+    val tempDir: Path =
+      Files.createTempDirectory("sbt-json-schema-2-scala-test_")
 
-  def compileSingle(sourceCode: String, verbose: Boolean = false): Either[Seq[String], ClassLoader] = {
-    val name = "Test_" + Random.alphanumeric.take(10)
-    compile(List((name, sourceCode)), verbose)
-  }
+    val sourceDir: Path =
+      tempDir.resolve("src")
+    Files.createDirectory(sourceDir)
 
-  /**
-    * Compile code units paired with the virtual file name
-    */
-  def compile(sourceCodeUnits: List[(String, String)], verbose: Boolean = false): Either[Seq[String], ClassLoader] = {
+    val outputDir: Path =
+      tempDir.resolve("classes")
+    Files.createDirectory(outputDir)
 
-    val reporter = new CompilationReporter(settings)
-    val global = new Global(settings, reporter)
-    val run = new global.Run
+    val settings =
+      createSettings(outputDir)
 
-    val sources = sourceCodeUnits.map {
-      case (path, sourceCode) =>
-        val file = Files.createTempFile(tempDir, path, ".scala")
-        new BatchSourceFile(AbstractFile.getFile(file.toAbsolutePath.toString), sourceCode.toCharArray)
+    override def compile(
+      sourceCodeUnits: List[(Path, String)],
+      verbose: Boolean = false): Either[Seq[String], ClassLoader] = {
+
+      val reporter = new CompilationReporter(settings)
+      val global = new Global(settings, reporter)
+      val run = new global.Run
+
+      val sources = sourceCodeUnits.map {
+        case (path, sourceCode) =>
+          val file = Files.createFile(sourceDir.resolve(path))
+          new BatchSourceFile(AbstractFile.getFile(file.toAbsolutePath.toString), sourceCode.toCharArray)
+      }
+
+      run.compileSources(sources)
+
+      val errors: Seq[String] = reporter.errors.result
+      if (errors.nonEmpty) {
+        if (verbose) sys.error(s"Compilation error(s) occurred [${errors.size}]:\n${errors.mkString("\n")}")
+        Left(errors)
+      } else {
+        if (verbose) println("Compilation succeeded.")
+        val classLoader: ClassLoader = new URLClassLoader(Array(outputDir.toUri.toURL), this.getClass.getClassLoader)
+        Right(classLoader)
+      }
+
     }
 
-    run.compileSources(sources)
+    private def createSettings(outputDir: Path): Settings = {
 
-    val errors: Seq[String] = reporter.errors.result
-    if (errors.nonEmpty) {
-      if (verbose) sys.error(s"Compilation error(s) occurred [${errors.size}]:\n${errors.mkString("\n")}")
-      Left(errors)
-    } else {
-      if (verbose) println("Compilation succeeded.")
-      val classLoader: ClassLoader = new URLClassLoader(Array(outputDir.toUri.toURL), this.getClass.getClassLoader)
-      Right(classLoader)
+      val settings = new Settings(s => {
+        sys.error("errors report: " + s)
+      })
+
+      val classLoader = this.getClass.getClassLoader
+
+      val urls = classLoader match {
+        case urlClassLoader: java.net.URLClassLoader => urlClassLoader.getURLs.toList
+        case a                                       => sys.error("Was expecting an URLClassLoader, found a " + a.getClass)
+      }
+
+      val classpath: Seq[String] = (urls map {
+        _.toString
+      }) :+ outputDir.toUri.toURL.toExternalForm
+
+      settings.bootclasspath.value = classpath.distinct.mkString(java.io.File.pathSeparator)
+      settings.classpath.value = classpath.distinct.mkString(java.io.File.pathSeparator)
+      settings.embeddedDefaults(classLoader)
+      settings.outputDirs.setSingleOutput(AbstractFile.getDirectory(outputDir.toFile))
+      settings
     }
 
+    override def cleanup(): Unit = {
+      cleanup(sourceDir)
+      cleanup(outputDir)
+    }
+
+    private def cleanup(path: Path): Unit =
+      Files.walkFileTree(
+        path,
+        new java.util.HashSet[FileVisitOption](),
+        1024,
+        new FileVisitor[Path] {
+          override def preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult =
+            FileVisitResult.CONTINUE
+
+          override def visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult = {
+            Files.delete(file)
+            FileVisitResult.CONTINUE
+          }
+
+          override def visitFileFailed(file: Path, exc: IOException): FileVisitResult = FileVisitResult.CONTINUE
+
+          override def postVisitDirectory(dir: Path, exc: IOException): FileVisitResult = {
+            if (dir != path) {
+              Files.delete(dir)
+            }
+            FileVisitResult.CONTINUE
+          }
+        }
+      )
   }
+
+  class CompilationError(msg: String) extends RuntimeException(msg)
 
   private class CompilationReporter(val settings: Settings) extends AbstractReporter {
     val errors = List.newBuilder[String]
@@ -87,27 +158,6 @@ object Compiler {
     }
 
     def displayPrompt() {}
-  }
-
-  class CompilationError(msg: String) extends RuntimeException(msg)
-
-  private def createSettings(outputDir: Path): Settings = {
-
-    val settings = new Settings(s => {
-      sys.error("errors report: " + s)
-    })
-
-    val classLoader = this.getClass.getClassLoader
-    val urls = classLoader match {
-      case urlClassLoader: java.net.URLClassLoader => urlClassLoader.getURLs.toList
-      case a                                       => sys.error("Was expecting an URLClassLoader, found a " + a.getClass)
-    }
-    val classpath = urls map { _.toString }
-    settings.bootclasspath.value = classpath.distinct.mkString(java.io.File.pathSeparator)
-    settings.classpath.value = classpath.distinct.mkString(java.io.File.pathSeparator)
-    settings.embeddedDefaults(classLoader)
-    settings.outputDirs.setSingleOutput(AbstractFile.getDirectory(outputDir.toFile))
-    settings
   }
 
 }

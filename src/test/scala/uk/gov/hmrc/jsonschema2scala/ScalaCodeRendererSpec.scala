@@ -32,9 +32,15 @@ package uk.gov.hmrc.jsonschema2scala
  * limitations under the License.
  */
 
-import org.scalatest.{Matchers, WordSpec}
+import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpec}
 
-class ScalaCodeRendererSpec extends WordSpec with Matchers with CodeRenderingAssertions with TestSchemas {
+class ScalaCodeRendererSpec
+    extends WordSpec with Matchers with CodeRenderingAssertions with TestSchemas with BeforeAndAfterAll {
+
+  implicit val compiler = Compiler()
+
+  override def afterAll(): Unit =
+    compiler.cleanup()
 
   "JsonSchema2ScalaCodeRenderer" should {
     "fail rendering simple schema of primitive type" in
@@ -46,7 +52,7 @@ class ScalaCodeRendererSpec extends WordSpec with Matchers with CodeRenderingAss
                              |}
                                """.stripMargin)
 
-    "render simple schema into a case class without body and no companion object" in
+    "render a simple schema into a case class without body and no companion object" in
       assertCanParseAndCompile("""
                                  |{
                                  |  "$id": "http://example.com/test.json",
@@ -67,7 +73,88 @@ class ScalaCodeRendererSpec extends WordSpec with Matchers with CodeRenderingAss
                                  |}
                              """.stripMargin)
 
-    "render simple schema containing oneOf values" in
+    "render a simple schema of an object having array of primitives" in
+      assertCanParseAndCompile("""
+                                 |{
+                                 |  "$id": "http://example.com/test.json",
+                                 |  "description": "A test schema",
+                                 |  "type": "object",
+                                 |  "properties": {
+                                 |    "one": {
+                                 |      "type": "string"
+                                 |    },
+                                 |    "second": {
+                                 |      "type": "array",
+                                 |      "minItems":1,
+                                 |			"items": {
+                                 |        "type": "string"
+                                 |      }
+                                 |    }
+                                 |  },
+                                 |  "required": [ "one" ]
+                                 |}
+                               """.stripMargin)
+
+    "render a simple schema of an object having array of objects" in
+      assertCanParseAndCompile("""
+                                 |{
+                                 |    "$id": "http://example.com/test.json",
+                                 |    "description": "A test schema",
+                                 |    "type": "object",
+                                 |    "properties": {
+                                 |        "one": {
+                                 |            "type": "string"
+                                 |        },
+                                 |        "second": {
+                                 |            "type": "array",
+                                 |            "minItems": 1,
+                                 |            "items": {
+                                 |                "type": "object",
+                                 |                "properties": {
+                                 |                    "one": {
+                                 |                        "type": "number"
+                                 |                    },
+                                 |                    "second": {
+                                 |                        "type": "boolean"
+                                 |                    }
+                                 |                },
+                                 |                "required": ["second"]
+                                 |            }
+                                 |        }
+                                 |    },
+                                 |    "required": ["one"]
+                                 |}
+                                 |""".stripMargin)
+
+    "render a simple schema containing oneOf alternative primitive values" in
+      assertCanParseAndCompile("""
+                                 |{
+                                 |  "$id": "http://example.com/test.json",
+                                 |  "description": "A test schema",
+                                 |  "type": "object",
+                                 |  "properties": {
+                                 |    "one": {
+                                 |      "oneOf":[
+                                 |         {
+                                 |           "type": "string"
+                                 |         },
+                                 |         {
+                                 |           "type": "number"
+                                 |         }
+                                 |      ]
+                                 |    },
+                                 |    "second": {
+                                 |      "type": "number"
+                                 |    },
+                                 |    "thi-rd": {
+                                 |      "type": "boolean"
+                                 |    }
+                                 |  },
+                                 |  "required": [ "second" ]
+                                 |}
+                               """.stripMargin)
+
+    "render a simple schema containing oneOf alternative object values" in
       assertCanParseAndCompile("""
                                  |{
                                  |  "$id": "http://example.com/test.json",
@@ -105,7 +192,40 @@ class ScalaCodeRendererSpec extends WordSpec with Matchers with CodeRenderingAss
                                  |}
                                """.stripMargin)
 
-    testSchemas.foreach { schema: JsonSchema.Schema =>
+    "render a simple schema containing oneOf alternative object and primitive values" in
+      assertCanParseAndCompile("""
+                                 |{
+                                 |  "$id": "http://example.com/test.json",
+                                 |  "description": "A test schema",
+                                 |  "type": "object",
+                                 |  "properties": {
+                                 |    "one": {
+                                 |      "oneOf":[
+                                 |         {
+                                 |           "type": "string"
+                                 |         },
+                                 |         {
+                                 |           "type": "object",
+                                 |           "properties": {
+                                 |              "one": {
+                                 |                "type": "number"
+                                 |              }
+                                 |           }
+                                 |         }
+                                 |      ]
+                                 |    },
+                                 |    "second": {
+                                 |      "type": "number"
+                                 |    },
+                                 |    "thi-rd": {
+                                 |      "type": "boolean"
+                                 |    }
+                                 |  },
+                                 |  "required": [ "one" ]
+                                 |}
+                               """.stripMargin)
+
+    testSchemas.filter(s => Set("Entity13", "Entity15").contains(s.className)).foreach { schema: JsonSchema.Schema =>
       s"render ${schema.className} schema" in assertCanParseAndCompile(schema, testReferences)
     }
   }

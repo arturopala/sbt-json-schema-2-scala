@@ -22,6 +22,8 @@ import uk.gov.hmrc.jsonschema2scala.ScalaCode._
 
 object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFieldGenerators with CodeRendererUtils {
 
+  val maxNumberOfArgs = 22
+
   override def typeName(definition: Definition): String = {
     val n = if (definition.isRef) pathToName(definition) else definition.name
     if (n.isEmpty) definition.name else firstCharUppercase(normalize(n))
@@ -214,40 +216,47 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
 
   def generateClassFields(typeDef: TypeDefinition): Seq[Param] =
     typeDef.definition.properties
-      .take(22)
-      .map(
-        prop =>
-          Param(
-            safeName(prop.name),
-            typeOf(prop, typeDef.prefix),
+      .take(maxNumberOfArgs)
+      .map(prop =>
+        Param(
+          name = safeName(prop.name),
+          typeName = typeOf(definition = prop, prefix = typeDef.prefix),
+          modifier =
             if (typeDef.interfaces.exists(_.interfaceMethods.exists(_._1 == prop.name)))
               Some("override val")
-            else None))
+            else None
+      ))
 
   def generateInterfaceMethods(typeDef: TypeDefinition): Seq[ScalaCode] =
     if (!typeDef.isInterface) Seq.empty
     else
       typeDef.interfaceMethods.map {
-        case (name, typeOf) => MethodDefinition(safeName(name), Seq.empty, typeOf, Seq.empty, None)
+        case (name, typeOf) =>
+          MethodDefinition(
+            name = safeName(name),
+            parameters = Seq.empty,
+            returnType = typeOf,
+            body = Seq.empty,
+            modifier = None)
       }.toSeq
 
   def generateFieldGenerators(definition: ObjectDefinition, context: ScalaCodeRendererContext): String =
     definition.properties
       .filter(_.isMandatory)
-      .take(22)
+      .take(maxNumberOfArgs)
       .map(prop => s"""${variableName(prop)} <- ${generateValueGenerator(prop, context)}""".stripMargin)
       .mkString("\n    ")
 
   def generateGenFieldsInitialization(definition: ObjectDefinition): String =
     definition.properties
       .filter(_.isMandatory)
-      .take(22)
+      .take(maxNumberOfArgs)
       .map(prop => s"""${safeName(prop.name)} = ${variableName(prop)}""".stripMargin)
       .mkString("\n    ", ",\n    ", "\n  ")
 
   def generateBuilderMethods(typeDef: TypeDefinition): Seq[ScalaCode] =
     typeDef.definition.properties
-      .take(22)
+      .take(maxNumberOfArgs)
       .flatMap(prop => {
         val propType = typeOf(prop, typeDef.prefix, defaultValue = false)
         Seq(
@@ -330,7 +339,7 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
     if (!context.renderValidators) Seq.empty
     else
       definition.properties
-        .take(22)
+        .take(maxNumberOfArgs)
         .map(prop => generateValueValidator(prop, context, extractProperty = false).map((prop, _)))
         .collect {
           case Some((prop, validator)) =>
@@ -345,7 +354,7 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
 
   def generateObjectValidator(definition: ObjectDefinition, context: ScalaCodeRendererContext): String = {
     val propertyValidatorsCalls = definition.properties
-      .take(22)
+      .take(maxNumberOfArgs)
       .map(prop => generateValueValidatorCall(prop, context))
       .collect { case Some(validator) => s"""$validator""".stripMargin }
     val validators =
@@ -458,7 +467,7 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
   def generateSanitizerList(definition: ObjectDefinition): String = {
     val simpleSanitizerList = definition.properties
       .filter(p => !(p.isMandatory && p.isPrimitive) && !definition.alternatives.exists(_.contains(p.name)))
-      .take(22)
+      .take(maxNumberOfArgs)
       .map(prop => s"${prop.name}Sanitizer")
     val sanitizerList =
       if (definition.alternatives.isEmpty) simpleSanitizerList
@@ -472,7 +481,7 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
 
   def generateSanitizers(definition: ObjectDefinition, context: ScalaCodeRendererContext): Seq[Option[ScalaCode]] = {
     val simpleSanitizers: Seq[Option[ScalaCode]] = definition.properties
-      .take(22)
+      .take(maxNumberOfArgs)
       .toList
       .map(prop =>
         if (prop.isMandatory) {
@@ -754,5 +763,36 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
             returnType = s"Format[${typeDef.name}]",
             body = Seq("Json.format[${typeDef.name}]"),
             modifier = Some("implicit"))))
+
+  override def typeOf(
+    definition: Definition,
+    prefix: String,
+    wrapOption: Boolean = true,
+    defaultValue: Boolean = true): String = {
+    val name = definition match {
+      case _: StringDefinition  => "String"
+      case _: NumberDefinition  => "BigDecimal"
+      case _: BooleanDefinition => "Boolean"
+      case a: ArrayDefinition   => s"Seq[${typeOf(a.item, prefix, wrapOption = false, defaultValue = false)}]"
+      case o: ObjectDefinition  => s"${if (o.isRef) "" else prefix}${typeName(o)}"
+      case o: OneOfDefinition =>
+        if (o.variants.isEmpty) "Nothing"
+        else if (o.variants.size == 1) typeOf(o.variants.head, prefix, wrapOption = false)
+        else if (o.variants.forall(_.isPrimitive)) "AnyVal"
+        else if (o.variants.forall(v => !v.isPrimitive)) s"${if (o.isRef) "" else prefix}${typeName(o)}"
+        else "Any"
+      case e: ExternalDefinition =>
+        e.`type` match {
+          case Some("object")  => s"${if (e.isRef) "" else prefix}${typeName(e)}"
+          case Some("string")  => "String"
+          case Some("number")  => "BigDecimal"
+          case Some("boolean") => "Boolean"
+          case Some(t)         => throw new Exception(s"Unsupported reference type $t")
+          case None            => throw new Exception(s"Missing reference type")
+        }
+    }
+    if (!definition.isMandatory && wrapOption) s"Option[$name]${if (defaultValue) " = None" else ""}"
+    else { s"""$name${if (defaultValue && definition.isBoolean) " = false" else ""}""" }
+  }
 
 }
