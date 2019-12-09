@@ -225,7 +225,7 @@ class ScalaCodeRendererSpec
                                  |}
                                """.stripMargin)
 
-    testSchemas.filter(s => Set("Entity13", "Entity15").contains(s.className)).foreach { schema: JsonSchema.Schema =>
+    testSchemas.foreach { schema: JsonSchema.Schema =>
       s"render ${schema.className} schema" in assertCanParseAndCompile(schema, testReferences)
     }
   }

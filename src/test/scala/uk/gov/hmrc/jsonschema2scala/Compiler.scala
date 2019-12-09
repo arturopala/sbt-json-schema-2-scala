@@ -114,10 +114,8 @@ object Compiler {
       settings
     }
 
-    override def cleanup(): Unit = {
-      cleanup(sourceDir)
-      cleanup(outputDir)
-    }
+    override def cleanup(): Unit =
+      cleanup(tempDir)
 
     private def cleanup(path: Path): Unit =
       Files.walkFileTree(
@@ -136,11 +134,10 @@ object Compiler {
           override def visitFileFailed(file: Path, exc: IOException): FileVisitResult = FileVisitResult.CONTINUE
 
           override def postVisitDirectory(dir: Path, exc: IOException): FileVisitResult = {
-            if (dir != path) {
-              Files.delete(dir)
-            }
+            Files.delete(dir)
             FileVisitResult.CONTINUE
           }
+
         }
       )
   }

@@ -1,99 +1,34 @@
 {
-  "$id": "http://example.com/card.schema.json",
+  "$id": "http://example.com/address.schema.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "description": "A representation of a person, company, organization, or place",
+  "description": "An address similar to http://microformats.org/wiki/h-card",
   "type": "object",
-  "required": [ "familyName", "givenName" ],
   "properties": {
-    "fn": {
-      "description": "Formatted Name",
+    "post-office-box": {
       "type": "string"
     },
-    "familyName": {
+    "extended-address": {
       "type": "string"
     },
-    "givenName": {
+    "street-address": {
       "type": "string"
     },
-    "additionalName": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "honorificPrefix": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "honorificSuffix": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "nickname": {
+    "locality": {
       "type": "string"
     },
-    "url": {
+    "region": {
       "type": "string"
     },
-    "email": {
-      "type": "object",
-      "properties": {
-        "type": {
-          "type": "string"
-        },
-        "value": {
-          "type": "string"
-        }
-      }
-    },
-    "tel": {
-      "type": "object",
-      "properties": {
-        "type": {
-          "type": "string"
-        },
-        "value": {
-          "type": "string"
-        }
-      }
-    },
-    "adr": { "$ref": "http://example.com/address.schema.json" },
-    "geo": { "$ref": "http://example.com/geographical-location.schema.json" },
-    "tz": {
+    "postal-code": {
       "type": "string"
     },
-    "photo": {
+    "country-name": {
       "type": "string"
-    },
-    "logo": {
-      "type": "string"
-    },
-    "sound": {
-      "type": "string"
-    },
-    "bday": {
-      "type": "string"
-    },
-    "title": {
-      "type": "string"
-    },
-    "role": {
-      "type": "string"
-    },
-    "org": {
-      "type": "object",
-      "properties": {
-        "organizationName": {
-          "type": "string"
-        },
-        "organizationUnit": {
-          "type": "string"
-        }
-      }
     }
+  },
+  "required": [ "locality", "region", "country-name" ],
+  "dependencies": {
+    "post-office-box": [ "street-address" ],
+    "extended-address": [ "street-address" ]
   }
 }
