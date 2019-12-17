@@ -73,6 +73,67 @@ class ScalaCodeRendererSpec
                                  |}
                              """.stripMargin)
 
+    "render a schema having deeply nested objects" in
+      assertCanParseAndCompile("""
+                                 |{
+                                 |  "$id": "http://example.com/test.json",
+                                 |  "description": "A test schema",
+                                 |  "type": "object",
+                                 |  "properties": {
+                                 |    "one": {
+                                 |      "type": "string"
+                                 |    },
+                                 |    "second": {
+                                 |      "type": "object",
+                                 |      "properties": {
+                                 |        "one": {
+                                 |          "type": "string"
+                                 |        },
+                                 |        "second": {
+                                 |          "type": "integer"
+                                 |        },
+                                 |        "third": {
+                                 |          "type": "object",
+                                 |          "properties": {
+                                 |            "one": {
+                                 |              "type": "object",
+                                 |              "properties": {
+                                 |                "second" : {
+                                 |                  "type": "array",
+                                 |                  "items": {
+                                 |                    "type": "object",
+                                 |                    "properties": {
+                                 |                      "one": {
+                                 |                        "type": "string"
+                                 |                      },
+                                 |                      "third": {
+                                 |                        "type": "number"
+                                 |                      }
+                                 |                    },
+                                 |                    "required": ["third"]
+                                 |                  }
+                                 |                }
+                                 |              }
+                                 |            },
+                                 |            "second": {
+                                 |             "type": "integer"
+                                 |            },
+                                 |            "third": {
+                                 |              "type": "boolean"
+                                 |            }
+                                 |          },
+                                 |          "required": [ "second", "third" ]
+                                 |        }
+                                 |      }
+                                 |    },
+                                 |    "third": {
+                                 |      "type": "string"
+                                 |    }
+                                 |  },
+                                 |  "required": [ "one", "third" ]
+                                 |}
+                               """.stripMargin)
+
     "render a simple schema of an object having array of primitives" in
       assertCanParseAndCompile("""
                                  |{
@@ -168,6 +229,9 @@ class ScalaCodeRendererSpec
                                  |           "properties": {
                                  |             "ver": {
                                  |               "type": "string"
+                                 |             },
+                                 |             "foo": {
+                                 |               "type": "integer"
                                  |             }
                                  |           }
                                  |         },
@@ -176,6 +240,9 @@ class ScalaCodeRendererSpec
                                  |           "properties": {
                                  |             "ver": {
                                  |               "type": "number"
+                                 |             },
+                                 |             "foo": {
+                                 |               "type": "integer"
                                  |             }
                                  |           }
                                  |         }
@@ -225,9 +292,90 @@ class ScalaCodeRendererSpec
                                  |}
                                """.stripMargin)
 
-    testSchemas.foreach { schema: JsonSchema.Schema =>
-      s"render ${schema.className} schema" in assertCanParseAndCompile(schema, testReferences)
-    }
+    "render a schema with internal references" in
+      assertCanParseAndCompile("""{
+                                 |  "$id": "http://example.com/test.json",
+                                 |  "description": "A test schema",
+                                 |  "type": "object",
+                                 |  "properties": {
+                                 |    "one": {
+                                 |      "$ref": "#/properties/second/definitions/one"
+                                 |    },
+                                 |    "second": {
+                                 |      "type": "object",
+                                 |      "properties": {
+                                 |        "one": {
+                                 |          "type": "string"
+                                 |        },
+                                 |        "second": {
+                                 |          "type": "integer"
+                                 |        },
+                                 |        "third": {
+                                 |          "$ref": "#/definitions/foo"
+                                 |        }
+                                 |      },
+                                 |      "definitions": {
+                                 |        "one": {
+                                 |          "type": "object",
+                                 |          "properties": {
+                                 |            "one": {
+                                 |              "type": "string"
+                                 |            }
+                                 |          }
+                                 |        }
+                                 |      }
+                                 |    },
+                                 |    "fourth": {
+                                 |      "$ref": "#/definitions/foo"
+                                 |    }
+                                 |  },
+                                 |  "required": [
+                                 |    "one",
+                                 |    "fourth"
+                                 |  ],
+                                 |  "definitions": {
+                                 |    "foo": {
+                                 |      "type": "object",
+                                 |      "properties": {
+                                 |        "one": {
+                                 |          "type": "object",
+                                 |          "properties": {
+                                 |            "one": {
+                                 |              "type": "integer"
+                                 |            },
+                                 |            "second": {
+                                 |              "type": "array",
+                                 |              "items": {
+                                 |                "type": "object",
+                                 |                "properties": {
+                                 |                  "one": {
+                                 |                    "$ref": "#/properties/second/definitions/one"
+                                 |                  },
+                                 |                  "third": {
+                                 |                    "type": "number"
+                                 |                  }
+                                 |                },
+                                 |                "required": [
+                                 |                  "third"
+                                 |                ]
+                                 |              }
+                                 |            }
+                                 |          }
+                                 |        },
+                                 |        "second": {
+                                 |          "type": "integer"
+                                 |        },
+                                 |        "third": {
+                                 |          "type": "boolean"
+                                 |        }
+                                 |      },
+                                 |      "required": [
+                                 |        "second",
+                                 |        "third"
+                                 |      ]
+                                 |    }
+                                 |  }
+                                 |}""".stripMargin)
   }
 
 }

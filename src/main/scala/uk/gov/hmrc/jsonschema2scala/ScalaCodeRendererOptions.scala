@@ -28,4 +28,4 @@ object JsonSchema2ScalaFeature {
   val ALL: Set[JsonSchema2ScalaFeature] = Set(Builder, PlayJson, Validator, Generator, Sanitizer)
 }
 
-case class JsonSchema2ScalaOptions(features: Set[JsonSchema2ScalaFeature], packageName: String)
+case class ScalaCodeRendererOptions(features: Set[JsonSchema2ScalaFeature], packageName: String)

@@ -32,17 +32,20 @@ package uk.gov.hmrc.jsonschema2scala
  * limitations under the License.
  */
 
-import org.scalatest.{Matchers, WordSpec}
+import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpec}
+import uk.gov.hmrc.jsonschema2scala.schema.SchemaSource
 
-class JsonSchemaSpec extends WordSpec with Matchers with TestSchemas {
+class ScalaCodeRendererMoreSpec
+    extends WordSpec with Matchers with CodeRenderingAssertions with TestSchemas with BeforeAndAfterAll {
 
-  "JsonSchema" should {
-    testSchemas.foreach { schema =>
-      s"read and parse ${schema.className} schema" in {
-        val json = schema.content
-        val definition = JsonSchema.read(json, testReferences)
-        definition.isPrimitive shouldBe false
-      }
+  implicit val compiler = Compiler()
+
+  override def afterAll(): Unit =
+    compiler.cleanup()
+
+  "JsonSchema2ScalaCodeRenderer" should {
+    testSchemas.filter(_.name == "Entity06").foreach { schema: SchemaSource =>
+      s"render ${schema.name} schema" in assertCanParseAndCompile(schema, testReferences)
     }
   }
 

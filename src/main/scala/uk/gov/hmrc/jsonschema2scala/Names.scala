@@ -17,10 +17,10 @@
 package uk.gov.hmrc.jsonschema2scala
 import java.util.regex.Pattern
 
-import uk.gov.hmrc.jsonschema2scala.JsonSchema.Definition
+import uk.gov.hmrc.jsonschema2scala.schema.Schema
 
 object Names {
-  final val NORMALIZE_PATTERN = Pattern.compile("""([_-]+?\w)""")
+  final val NORMALIZE_PATTERN = Pattern.compile("""([_/@:$-]+?\w)""")
 
   final def normalize(text: String): String = {
     val m = NORMALIZE_PATTERN.matcher(text)
@@ -28,7 +28,7 @@ object Names {
     var last = 0
     while (m.find) {
       sb.append(text.substring(last, m.start))
-      sb.append(m.group(0).replaceAll("[_-]", "").toUpperCase)
+      sb.append(m.group(0).replaceAll("[_/@:$-]", "").toUpperCase)
       last = m.end
     }
     sb.append(text.substring(last))
@@ -43,12 +43,12 @@ object Names {
     if (text.isEmpty) text
     else text.substring(0, 1).toLowerCase + text.substring(1)
 
-  final def variableName(definition: Definition): String =
+  final def variableName(definition: Schema): String =
     firstCharLowercase(normalize(definition.name))
 
-  final def pathLastPart(definition: Definition): String = definition.path.split("/").last
+  final def pathLastPart(definition: Schema): String = definition.path.head
 
-  final def pathToName(definition: Definition): String = {
+  final def pathToName(definition: Schema): String = {
     val name = pathLastPart(definition)
     if (name.endsWith("Type")) name.dropRight(4) else name
   }

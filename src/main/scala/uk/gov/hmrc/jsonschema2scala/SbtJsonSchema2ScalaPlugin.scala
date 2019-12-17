@@ -18,10 +18,9 @@ package uk.gov.hmrc.jsonschema2scala
 
 import java.io._
 
-import play.api.libs.json.{JsObject, Json}
 import sbt.Keys._
 import sbt._
-import uk.gov.hmrc.jsonschema2scala.JsonSchema.{Definition, SchemaFile}
+import uk.gov.hmrc.jsonschema2scala.schema.{Schema, SchemaFile}
 
 import scala.io.Source
 
@@ -53,7 +52,7 @@ object SbtJsonSchema2ScalaPlugin extends AutoPlugin {
         JsonSchema2ScalaGenerateScalaCodeTask.apply(
           jsonSchema2ScalaResources.value,
           jsonSchema2ScalaTargetDirectory.value,
-          JsonSchema2ScalaOptions(
+          ScalaCodeRendererOptions(
             features = jsonSchema2ScalaFeatures.value,
             packageName = jsonSchema2ScalaPackageName.value
           )
@@ -72,10 +71,10 @@ object SbtJsonSchema2ScalaPlugin extends AutoPlugin {
     def apply(
       jsonSchemaSourceDirectory: File,
       scalaCodeTargetDirectory: File,
-      options: JsonSchema2ScalaOptions): Seq[File] =
+      options: ScalaCodeRendererOptions): Seq[File] =
       process(jsonSchemaSourceDirectory, scalaCodeTargetDirectory, options)
 
-    def process(sourceDirectory: File, targetDirectory: File, options: JsonSchema2ScalaOptions): Seq[File] = {
+    def process(sourceDirectory: File, targetDirectory: File, options: ScalaCodeRendererOptions): Seq[File] = {
       if (!targetDirectory.exists()) targetDirectory.mkdirs()
       val generatedScalaFiles = listFiles(sourceDirectory, suffix = ".json") match {
         case files: Seq[File] if files.nonEmpty =>
@@ -95,22 +94,32 @@ object SbtJsonSchema2ScalaPlugin extends AutoPlugin {
     def processJsonSchemas2Code(
       jsonSchemaFiles: Seq[File],
       targetDirectory: File,
-      options: JsonSchema2ScalaOptions): Seq[File] = {
+      options: ScalaCodeRendererOptions): Seq[File] = {
+
       println(s"Processing ${jsonSchemaFiles.size} schemas(s) with options $options")
-      val schemas: Seq[SchemaFile] = parseJsonSchemas(jsonSchemaFiles)
-      val definitions: Seq[(SchemaFile, Definition)] = schemas.zip(JsonSchema.readMultiple(schemas))
-      definitions.map {
+
+      val schemaSources: Seq[SchemaFile] = parseJsonSchemas(jsonSchemaFiles)
+      val schemas: Seq[(SchemaFile, Schema)] = schemaSources.zip(Schema.readMultiple(schemaSources))
+
+      schemas.map {
         case (schemaFile, definition) =>
-          val target = new File(targetDirectory.getAbsolutePath + File.separator + schemaFile.className + ".scala")
-          println(s"Generating ${schemaFile.className}.scala from ${schemaFile.file.getName}")
-          val code: Seq[Code] = JsonSchema2ScalaCodeRenderer.render(
-            schemaFile.className,
-            definition,
-            options,
-            s"Generated from JSON Schema ${schemaFile.file.getName}"
-          )
-          val content = Code.toString(code)
-          writeToFile(target, content)
+          val target = new File(targetDirectory.getAbsolutePath + File.separator + schemaFile.name + ".scala")
+          println(s"Generating ${schemaFile.name}.scala from ${schemaFile.file.getName}")
+          ScalaCodeRenderer
+            .render(
+              definition,
+              options,
+              s"Generated from JSON Schema ${schemaFile.file.getName}"
+            )
+            .fold(
+              errors => {
+                println(errors.zipWithIndex.map { case (e, i) => s"[$i] $e" }.mkString("\n"))
+              },
+              code => {
+                val content = Code.toString(code)
+                writeToFile(target, content)
+              }
+            )
           target
       }
     }
@@ -129,7 +138,7 @@ object SbtJsonSchema2ScalaPlugin extends AutoPlugin {
     def parseJsonSchemas(files: Seq[File]): Seq[SchemaFile] =
       files.map(SchemaFile.apply)
 
-    def options2Variables(options: JsonSchema2ScalaOptions): Seq[(String, String)] =
+    def options2Variables(options: ScalaCodeRendererOptions): Seq[(String, String)] =
       Seq("package" -> s"package ${options.packageName}")
 
     def copyResourceTo(targetDirectory: File, variables: Seq[(String, String)])(resourcePath: String): File = {

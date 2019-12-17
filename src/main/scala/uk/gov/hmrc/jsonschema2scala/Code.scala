@@ -33,7 +33,7 @@ object Code {
 
 trait Sink {
   protected var indentSize = 0
-  protected val indent = " "
+  protected val indent = "  "
 
   def append(s: String): Sink
   def newline: Sink = append("\n").append(indent * indentSize)

@@ -1,12 +1,38 @@
+/*
+ * Copyright 2019 HM Revenue & Customs
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package uk.gov.hmrc.jsonschema2scala
 
 sealed trait ScalaCode extends Code
 
 object ScalaCode {
 
-  case class CaseClass(name: String, parameters: Seq[Param], supertypes: Seq[String], members: Seq[ScalaCode])
+  case class CaseClass(
+    name: String,
+    parameters: Seq[Param],
+    supertypes: Seq[String],
+    members: Seq[ScalaCode],
+    comment: Option[String] = None)
       extends ScalaCode {
     override def append(b: Sink): Unit = {
+      b.newline
+      comment.foreach { c =>
+        BlockComment.append(c, b, doc = true)
+        b.newline
+      }
       b.append("case class ")
       b.append(name)
       b.append("(")
@@ -45,6 +71,7 @@ object ScalaCode {
   case class Object(name: String, supertypes: Seq[String], members: Seq[ScalaCode]) extends ScalaCode {
 
     override def append(b: Sink): Unit = {
+      b.newline
       b.append("object ")
       b.append(name)
       b.append(" {")
@@ -60,9 +87,19 @@ object ScalaCode {
     def asOption: Option[Object] = if (members.isEmpty) None else Some(this)
   }
 
-  case class Trait(name: String, supertypes: Seq[String], members: Seq[ScalaCode], modifier: Option[String] = None)
+  case class Trait(
+    name: String,
+    supertypes: Seq[String],
+    members: Seq[ScalaCode],
+    modifier: Option[String] = None,
+    comment: Option[String] = None)
       extends ScalaCode {
     override def append(b: Sink): Unit = {
+      b.newline
+      comment.foreach { c =>
+        BlockComment.append(c, b, doc = true)
+        b.newline
+      }
       modifier.foreach(m => {
         b.append(m)
         b.append(" ")
@@ -79,10 +116,10 @@ object ScalaCode {
       }
       if (members.nonEmpty) {
         b.append(" {")
-        b.indentInc.newline
+        b.indentInc
         members.foreach(m => {
-          m.append(b)
           b.newline
+          m.append(b)
         })
         b.indentDec.newline
         b.append("}")
@@ -90,8 +127,13 @@ object ScalaCode {
     }
   }
 
-  case class Param(name: String, typeName: String, modifier: Option[String] = None) extends ScalaCode {
+  case class Param(name: String, typeName: String, modifier: Option[String] = None, comment: Option[String] = None)
+      extends ScalaCode {
     override def append(b: Sink): Unit = {
+      comment.foreach { c =>
+        BlockComment.append(c, b, doc = false)
+        b.newline
+      }
       modifier.foreach(m => {
         b.append(m)
         b.append(" ")
@@ -106,6 +148,7 @@ object ScalaCode {
     override def append(b: Sink): Unit = {
       b.append("package ")
       b.append(name)
+      b.newline
     }
   }
 
@@ -139,20 +182,35 @@ object ScalaCode {
     }
   }
 
-  case class BlockComment(comment: String) extends ScalaCode {
-    override def append(b: Sink): Unit = {
-      val lines = comment.split('\n')
+  case class BlockComment(comment: String, doc: Boolean = true) extends ScalaCode {
+    override def append(sink: Sink): Unit = BlockComment.append(comment, sink, doc)
+  }
+
+  object BlockComment {
+    def append(comment: String, b: Sink, doc: Boolean): Unit = {
+      val lines = comment
+        .split('\n')
+        .foldLeft(List.empty[String])(
+          (acc, v) =>
+            if (v.trim.nonEmpty) v :: acc
+            else
+              acc match {
+                case Nil                       => v :: Nil
+                case x :: xs if x.trim.isEmpty => xs
+                case _                         => v :: acc
+            })
+        .reverse
       lines.headOption.map(line => {
-        b.append("/**")
+        b.append(if (doc) "/** " else "/* ")
         b.append(line)
-        b.newline
       })
       lines.tail.foreach(line => {
-        b.append("  *")
-        b.append(line)
         b.newline
+        b.append(if (doc) "  * " else " * ")
+        b.append(line)
       })
-      b.append("  */")
+      if (lines.length > 1) b.newline
+      b.append(if (doc) "  */" else " */")
     }
   }
 

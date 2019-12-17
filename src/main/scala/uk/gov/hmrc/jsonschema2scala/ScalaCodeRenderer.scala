@@ -16,41 +16,56 @@
 
 package uk.gov.hmrc.jsonschema2scala
 
-import uk.gov.hmrc.jsonschema2scala.JsonSchema._
 import uk.gov.hmrc.jsonschema2scala.Names._
 import uk.gov.hmrc.jsonschema2scala.ScalaCode._
+import uk.gov.hmrc.jsonschema2scala.schema.{ArraySchema, BooleanSchema, ExternalReference, NumberSchema, ObjectSchema, OneOfSchema, Schema, StringSchema}
 
-object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFieldGenerators with CodeRendererUtils {
+object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with CodeRendererUtils {
 
   val maxNumberOfArgs = 22
 
-  override def typeName(definition: Definition): String = {
-    val n = if (definition.isRef) pathToName(definition) else definition.name
-    if (n.isEmpty) definition.name else firstCharUppercase(normalize(n))
+  override type CodeRendererOptions = ScalaCodeRendererOptions
+
+  override def render(schema: Schema, options: ScalaCodeRendererOptions, description: String): CodeRenderingResult = {
+    implicit val typeNameProvider: TypeNameProvider = ScalaTypeNameProvider
+
+    val types: Seq[TypeDefinition] = TypeDefinitionsBuilder.buildFrom(schema)
+    val schemaUrlToTypePath: Map[String, List[String]] = types.flatMap(TypeDefinition.listSchemaUrlToTypePath).toMap
+    val schemaUrlToTypeInterfaces: Map[String, Seq[List[String]]] =
+      types.flatMap(TypeDefinition.listSchemaUrlToTypeInterfaces).groupBy(_._1).mapValues(_.flatMap(_._2))
+
+    implicit val typeResolver: TypeResolver = new ScalaTypeResolver(schemaUrlToTypePath, schemaUrlToTypeInterfaces)
+
+    types
+      .map(typeDef => render(typeDef, options, ScalaCodeRendererContext(schema, options), description))
+      .fold(Right(Seq.empty))(EitherX.combine[List[String], Seq[Code]](_ ++ _, _ ++ _))
   }
 
   def render(
-    className: String,
     typeDef: TypeDefinition,
-    options: JsonSchema2ScalaOptions,
-    description: String): Seq[ScalaCode] = {
+    options: ScalaCodeRendererOptions,
+    context: ScalaCodeRendererContext,
+    description: String)(
+    implicit typeResolver: TypeResolver,
+    typeNameProvider: TypeNameProvider): CodeRenderingResult = {
 
-    val context = ScalaCodeRendererContext(typeDef.definition, options)
+    val code: Seq[Option[ScalaCode]] =
+      Seq(
+        Some(BlockComment(
+          s"""
+             | ---------------------------------------------------
+             | THIS FILE HAS BEEN GENERATED - DO NOT MODIFY IT !!!
+             |          CHANGE THE JSON SCHEMA IF NEEDED
+             | ---------------------------------------------------
+             | $description
+             | ${renderTypesOverview(typeDef)}
+             |""".stripMargin,
+          doc = false
+        ))) ++ Seq(Some(Package(options.packageName))) ++
+        generateGlobalImports(context) ++
+        generateTypeDefinition(typeDef, isTopLevel = true, context)
 
-    val code: Seq[Option[ScalaCode]] = Seq(Some(Package(options.packageName))) ++
-      generateGlobalImports(context) ++
-      Seq(Some(BlockComment(s"""
-                               | ---------------------------------------------------
-                               | THIS FILE HAS BEEN GENERATED - DO NOT MODIFY IT !!!
-                               |          CHANGE THE JSON SCHEMA IF NEEDED
-                               | ---------------------------------------------------
-                               | $description
-                               | Structure:
-                               |  ${generateTypesMap(typeDef)}
-        """.stripMargin))) ++
-      generateTypeDefinition(typeDef, isTopLevel = true, context)
-
-    code.collect(defined)
+    Right(code.collect(defined))
   }
 
   def generateGlobalImports(context: ScalaCodeRendererContext): Seq[Option[ScalaCode]] =
@@ -58,43 +73,44 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
       context.generatorsOpt.map(_ => Import("org.scalacheck", List("Arbitrary", "Gen"))),
       context.playJsonOpt.map(_ => WildcardImport("play.api.libs.json")))
 
-  def generateTypesMap(typeDef: TypeDefinition, level: Int = 1): String =
-    s"${typeDef.name}${typeDef.nestedTypes
-      .filter(!_.definition.isRef || level == 1)
-      .map(t => "\n  *  " + ("-  " * level) + generateTypesMap(t, level + 1))
-      .mkString("")}"
+  def renderTypesOverview(typeDef: TypeDefinition): String = {
+    val types = computeTypesTree(typeDef, 0)
+    if (types.size <= 1) ""
+    else "Content:\n\n" + types.map { case (name, level) => "    " + (".  " * level) + name }.mkString("\n") + "\n\n"
+  }
 
-  def generateTypeDefinition(
-    typeDef: TypeDefinition,
-    isTopLevel: Boolean,
-    context: ScalaCodeRendererContext): Seq[Option[ScalaCode]] = {
+  def computeTypesTree(typeDef: TypeDefinition, level: Int): Seq[(String, Int)] =
+    Seq((typeDef.name, level)) ++ typeDef.nestedTypes.flatMap(computeTypesTree(_, level + 1))
+
+  def generateTypeDefinition(typeDef: TypeDefinition, isTopLevel: Boolean, context: ScalaCodeRendererContext)(
+    implicit typeResolver: TypeResolver,
+    typeNameProvider: TypeNameProvider): Seq[Option[ScalaCode]] = {
 
     lazy val classFields: Seq[Param] =
       generateClassFields(typeDef)
 
     lazy val propertyValidators: Seq[Option[ScalaCode]] =
-      generatePropertyValidators(typeDef.definition, context)
+      generatePropertyValidators(typeDef, context)
 
     lazy val objectValidator: String =
-      generateObjectValidator(typeDef.definition, context)
+      generateObjectValidator(typeDef, context)
 
     lazy val fieldGenerators: String =
-      generateFieldGenerators(typeDef.definition, context)
+      generateFieldGenerators(typeDef, context)
 
     lazy val fieldsInitialization: String =
-      generateGenFieldsInitialization(typeDef.definition)
+      generateGenFieldsInitialization(typeDef)
 
     lazy val sanitizers: Seq[Option[ScalaCode]] =
-      generateSanitizers(typeDef.definition, context)
+      generateSanitizers(typeDef, context)
 
     lazy val sanitizerList: String =
-      generateSanitizerList(typeDef.definition)
+      generateSanitizerList(typeDef)
 
     lazy val customObject: Seq[Option[ScalaCode]] =
       if (isTopLevel) generateCustomObjectDeclaration(context) else Seq.empty
 
     lazy val nestedTypesDefinitions: Seq[Option[ScalaCode]] = typeDef.nestedTypes
-      .filter(!_.definition.isRef || isTopLevel)
       .flatMap(t => generateTypeDefinition(t, isTopLevel = false, context))
 
     lazy val objectMembersCode: Seq[Option[ScalaCode]] = if (isTopLevel) {
@@ -117,7 +133,7 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
     //    CASE CLASS AND OBJECT TEMPLATE
     // -----------------------------------------
 
-    val classCode2 =
+    /*val classCode2 =
       if (typeDef.isInterface)
         s"""sealed trait ${typeDef.name} {${generateInterfaceMethods(typeDef)}}""".stripMargin
       else
@@ -125,7 +141,7 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
         |  $classFields${if (isTopLevel && context.renderGenerators)
           s""",
              |  id: Option[String] = None
-             |) extends Record${if (typeDef.hasInterfaces) " with " else ""}${generateClassInterfaces(typeDef)} {
+             |) extends Record${if (typeDef.hasInterfaces) " with " else ""}${generateClassInterfacesSignature(typeDef)} {
              |
              |  override def uniqueKey: Option[String] = ${context.uniqueKey
                .map(key => s"${key._1}.map(${typeDef.name}.uniqueKey)")
@@ -136,23 +152,30 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
              |  override def withId(id: Option[String]): ${typeDef.name} = copy(id = id)
              |""".stripMargin
         else
-          s")${if (typeDef.hasInterfaces) " extends " else ""}${generateClassInterfaces(typeDef)} {"}
+          s")${if (typeDef.hasInterfaces) " extends " else ""}${generateClassInterfacesSignature(typeDef)} {"}
         |
         |  ${if (context.renderBuilders) generateBuilderMethods(typeDef) else ""}
-        |}"""
+        |}"""*/
 
     val classCode =
       if (typeDef.isInterface)
-        Trait(typeDef.name, Seq.empty, generateInterfaceMethods(typeDef), Some("sealed"))
+        Trait(
+          name = typeDef.name,
+          supertypes = Seq.empty,
+          members = generateInterfaceMethods(findCommonFields(typeDef.subtypes, typeDef)),
+          modifier = Some("sealed"),
+          comment = Some(s"${typeDef.schema.description.map(d => s"$d\n").getOrElse("")}Schema: ${typeDef.schema.url}")
+        )
       else
         CaseClass(
           name = typeDef.name,
           parameters = classFields ++ (if (isTopLevel && context.renderGenerators)
                                          Seq(Param("id", "Option[String] = None"))
                                        else Seq.empty),
-          supertypes = (if (isTopLevel && context.renderGenerators) Seq("Record") else Seq.empty) ++ generateClassInterfaces(
+          supertypes = (if (isTopLevel && context.renderGenerators) Seq("Record") else Seq.empty) ++ compileClassInterfaceList(
             typeDef),
-          members = if (context.renderBuilders) generateBuilderMethods(typeDef) else Seq.empty
+          members = if (context.renderBuilders) generateBuilderMethods(typeDef) else Seq.empty,
+          comment = Some(s"${typeDef.schema.description.map(d => s"$d\n").getOrElse("")}Schema: ${typeDef.schema.url}")
         )
 
     val objectCode =
@@ -210,80 +233,104 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
                     body = Seq(quoted(s"${key._2}:$${key.toUpperCase}")))))
           else Seq.empty)
 
-  def generateClassInterfaces(typeDef: TypeDefinition): Seq[String] =
-    if (typeDef.interfaces.isEmpty) Seq.empty
-    else typeDef.interfaces.map(it => s"${it.prefix}${it.name}").distinct
+  def compileClassInterfaceList(typeDef: TypeDefinition)(implicit typeResolver: TypeResolver): List[String] =
+    (typeDef.interfaces
+      .map(it => typeResolver.typeOf(it.schema, typeDef, wrapAsOption = false, showDefaultValue = false))
+      .distinct
+      .toList ++ typeResolver.interfacesOf(typeDef.schema, typeDef)).sorted
 
-  def generateClassFields(typeDef: TypeDefinition): Seq[Param] =
-    typeDef.definition.properties
+  def generateClassFields(
+    typeDef: TypeDefinition)(implicit typeResolver: TypeResolver, typeNameProvider: TypeNameProvider): Seq[Param] =
+    typeDef.schema.properties
       .take(maxNumberOfArgs)
-      .map(prop =>
-        Param(
-          name = safeName(prop.name),
-          typeName = typeOf(definition = prop, prefix = typeDef.prefix),
-          modifier =
-            if (typeDef.interfaces.exists(_.interfaceMethods.exists(_._1 == prop.name)))
-              Some("override val")
-            else None
-      ))
+      .sortBy(fieldOrder)
+      .map(
+        schema =>
+          Param(
+            name = typeNameProvider.safe(schema.name),
+            typeName = typeResolver.typeOf(schema, typeDef),
+            comment = schema.description
+        ))
 
-  def generateInterfaceMethods(typeDef: TypeDefinition): Seq[ScalaCode] =
-    if (!typeDef.isInterface) Seq.empty
-    else
-      typeDef.interfaceMethods.map {
-        case (name, typeOf) =>
+  def fieldOrder(schema: Schema): Int = if (schema.mandatory) 0 else if (schema.isBoolean) 1 else 2
+
+  def generateInterfaceMethods(interfaceFields: Set[(String, String)])(
+    implicit typeNameProvider: TypeNameProvider): Seq[ScalaCode] =
+    interfaceFields.toSeq
+      .sortBy(_._1)
+      .map {
+        case (fieldName, fieldTypeName) =>
           MethodDefinition(
-            name = safeName(name),
+            name = typeNameProvider.safe(fieldName),
             parameters = Seq.empty,
-            returnType = typeOf,
+            returnType = fieldTypeName,
             body = Seq.empty,
             modifier = None)
-      }.toSeq
+      }
 
-  def generateFieldGenerators(definition: ObjectDefinition, context: ScalaCodeRendererContext): String =
-    definition.properties
-      .filter(_.isMandatory)
+  def findCommonFields(types: Seq[TypeDefinition], viewpoint: TypeDefinition)(
+    implicit typeResolver: TypeResolver): Set[(String, String)] =
+    types
+      .map(_.schema)
+      .map {
+        case o: ObjectSchema =>
+          o.properties
+            .map(schema => (schema.name, typeResolver.typeOf(schema, viewpoint, showDefaultValue = false)))
+            .toSet
+        case _ => Set.empty[(String, String)]
+      } match {
+      case s if s.isEmpty => Set.empty
+      case s              => s.reduce[Set[(String, String)]]((a, b) => a.intersect(b))
+    }
+
+  def generateFieldGenerators(typeDef: TypeDefinition, context: ScalaCodeRendererContext)(
+    implicit typeResolver: TypeResolver,
+    typeNameProvider: TypeNameProvider): String =
+    typeDef.schema.properties
+      .filter(_.mandatory)
       .take(maxNumberOfArgs)
-      .map(prop => s"""${variableName(prop)} <- ${generateValueGenerator(prop, context)}""".stripMargin)
+      .map(prop => s"""${variableName(prop)} <- ${generateValueGenerator(typeDef, prop, context)}""".stripMargin)
       .mkString("\n    ")
 
-  def generateGenFieldsInitialization(definition: ObjectDefinition): String =
-    definition.properties
-      .filter(_.isMandatory)
+  def generateGenFieldsInitialization(typeDef: TypeDefinition)(implicit typeNameProvider: TypeNameProvider): String =
+    typeDef.schema.properties
+      .filter(_.mandatory)
       .take(maxNumberOfArgs)
-      .map(prop => s"""${safeName(prop.name)} = ${variableName(prop)}""".stripMargin)
+      .map(prop => s"""${typeNameProvider.safe(prop.name)} = ${variableName(prop)}""".stripMargin)
       .mkString("\n    ", ",\n    ", "\n  ")
 
-  def generateBuilderMethods(typeDef: TypeDefinition): Seq[ScalaCode] =
-    typeDef.definition.properties
+  def generateBuilderMethods(
+    typeDef: TypeDefinition)(implicit typeResolver: TypeResolver, typeNameProvider: TypeNameProvider): Seq[ScalaCode] =
+    typeDef.schema.properties
       .take(maxNumberOfArgs)
-      .flatMap(prop => {
-        val propType = typeOf(prop, typeDef.prefix, defaultValue = false)
+      .flatMap(schema => {
+        val typeName = typeResolver.typeOf(schema, typeDef, showDefaultValue = false)
         Seq(
           MethodDefinition(
-            name = s"with${firstCharUppercase(normalize(prop.name))}",
-            parameters = Seq(Param(safeName(prop.name), propType)),
+            name = s"with${firstCharUppercase(normalize(schema.name))}",
+            parameters = Seq(Param(typeNameProvider.safe(schema.name), typeName)),
             returnType = typeDef.name,
-            body = Seq(s"copy(${safeName(prop.name)} = ${safeName(prop.name)})")
+            body = Seq(s"copy(${typeNameProvider.safe(schema.name)} = ${typeNameProvider.safe(schema.name)})")
           ),
           MethodDefinition(
-            name = s"modify${firstCharUppercase(normalize(prop.name))}",
-            parameters = Seq(Param("pf", s"PartialFunction[$propType, $propType]")),
+            name = s"modify${firstCharUppercase(normalize(schema.name))}",
+            parameters = Seq(Param("pf", s"PartialFunction[$typeName, $typeName]")),
             returnType = typeDef.name,
-            body = Seq(
-              s"if (pf.isDefinedAt(${safeName(prop.name)})) copy(${safeName(prop.name)} = pf(${safeName(prop.name)})) else this")
+            body = Seq(s"if (pf.isDefinedAt(${typeNameProvider.safe(schema.name)})) copy(${typeNameProvider
+              .safe(schema.name)} = pf(${typeNameProvider.safe(schema.name)})) else this")
           )
         )
       })
 
   def generateValueGenerator(
-    property: Definition,
+    hostType: TypeDefinition,
+    property: Schema,
     context: ScalaCodeRendererContext,
-    wrapOption: Boolean = true): String = {
+    wrapOption: Boolean = true)(implicit typeResolver: TypeResolver, typeNameProvider: TypeNameProvider): String = {
     val gen = knownFieldGenerators(property.name)
       .orElse(knownFieldGenerators(pathLastPart(property)))
       .getOrElse(property match {
-        case s: StringDefinition =>
+        case s: StringSchema =>
           s.customGenerator.getOrElse(if (s.enum.isDefined) {
             if (s.enum.get.size == 1)
               s"""Gen.const("${s.enum.get.head}")"""
@@ -295,7 +342,7 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
             s"""Generator.stringMinMaxN(${s.minLength.getOrElse(1)},${s.maxLength.getOrElse(256)})"""
           else "Generator.stringMaxN(256)")
 
-        case n: NumberDefinition =>
+        case n: NumberSchema =>
           n.customGenerator.getOrElse((n.minimum, n.maximum, n.multipleOf) match {
             case (Some(min), Some(max), mlt) => s"Generator.chooseBigDecimal($min,$max,$mlt)"
             case (Some(min), None, mlt)      => s"Generator.chooseBigDecimal($min,100000000,$mlt)"
@@ -303,26 +350,27 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
             case _                           => "Gen.const(BigDecimal(0))"
           })
 
-        case b: BooleanDefinition => "Generator.booleanGen"
-        case a: ArrayDefinition   => s"Generator.nonEmptyListOfMaxN(1,${generateValueGenerator(a.item, context, false)})"
-        case o: ObjectDefinition  => s"${typeName(o)}.gen"
+        case b: BooleanSchema => "Generator.booleanGen"
+        case a: ArraySchema =>
+          s"Generator.nonEmptyListOfMaxN(1,${generateValueGenerator(hostType, a.item, context, false)})"
+        case o: ObjectSchema => s"${typeNameProvider.toTypeName(o)}.gen"
 
-        case o: OneOfDefinition =>
+        case o: OneOfSchema =>
           if (o.variants.isEmpty) "???"
-          else if (o.variants.size == 1) generateValueGenerator(o.variants.head, context)
+          else if (o.variants.size == 1) generateValueGenerator(hostType, o.variants.head, context)
           else
             o.variants.head match {
-              case _: ObjectDefinition => s"${typeName(o)}.gen"
+              case _: ObjectSchema => s"${typeNameProvider.toTypeName(o)}.gen"
               case _ =>
-                s"Gen.oneOf[${typeName(o)}](${o.variants
-                  .map(v => s"${generateValueGenerator(v, context)}.map(_.asInstanceOf[${typeOf(v, "")}])")
+                s"Gen.oneOf[${typeNameProvider.toTypeName(o)}](${o.variants
+                  .map(v => s"${generateValueGenerator(hostType, v, context)}.map(_.asInstanceOf[${typeResolver.typeOf(v, hostType, showDefaultValue = false)}])")
                   .mkString(",\n  ")})"
             }
-        case e: ExternalDefinition => s"${typeName(e)}.gen"
+        case e: ExternalReference => s"${typeNameProvider.toTypeName(e)}.gen"
       })
 
     val genWithConstraints = property match {
-      case s: StringDefinition =>
+      case s: StringSchema =>
         val withMinLength = s.minLength.map(minLength => s"""$gen.suchThat(_.length>=$minLength)""").getOrElse(gen)
         val withMaxLength =
           s.maxLength.map(maxLength => s"""$withMinLength.suchThat(_.length<=$maxLength)""").getOrElse(withMinLength)
@@ -330,15 +378,15 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
       case _ => gen
     }
 
-    if (!property.isMandatory && wrapOption) s"""Generator.optionGen($genWithConstraints)""" else genWithConstraints
+    if (!property.mandatory && wrapOption) s"""Generator.optionGen($genWithConstraints)""" else genWithConstraints
   }
 
-  def generatePropertyValidators(
-    definition: ObjectDefinition,
-    context: ScalaCodeRendererContext): Seq[Option[ScalaCode]] =
+  def generatePropertyValidators(typeDef: TypeDefinition, context: ScalaCodeRendererContext)(
+    implicit typeResolver: TypeResolver,
+    typeNameProvider: TypeNameProvider): Seq[Option[ScalaCode]] =
     if (!context.renderValidators) Seq.empty
     else
-      definition.properties
+      typeDef.schema.properties
         .take(maxNumberOfArgs)
         .map(prop => generateValueValidator(prop, context, extractProperty = false).map((prop, _)))
         .collect {
@@ -346,40 +394,46 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
             Some(
               ValueDefinition(
                 name = s"${prop.name}Validator",
-                returnType = s"Validator[${typeOf(prop, "", defaultValue = false)}]",
+                returnType = s"Validator[${typeResolver.typeOf(prop, typeDef, showDefaultValue = false)}]",
                 body = Seq(validator),
                 modifier = None
               ))
         }
 
-  def generateObjectValidator(definition: ObjectDefinition, context: ScalaCodeRendererContext): String = {
-    val propertyValidatorsCalls = definition.properties
+  def generateObjectValidator(typeDef: TypeDefinition, context: ScalaCodeRendererContext)(
+    implicit typeNameProvider: TypeNameProvider): String = {
+    val propertyValidatorsCalls = typeDef.schema.properties
       .take(maxNumberOfArgs)
       .map(prop => generateValueValidatorCall(prop, context))
       .collect { case Some(validator) => s"""$validator""".stripMargin }
     val validators =
-      if (definition.alternatives.isEmpty) propertyValidatorsCalls
+      if (typeDef.schema.alternatives.isEmpty) propertyValidatorsCalls
       else
         propertyValidatorsCalls :+
-          s"""  checkIfOnlyOneSetIsDefined(${definition.alternatives
+          s"""  checkIfOnlyOneSetIsDefined(${typeDef.schema.alternatives
             .map(_.map(a => {
-              definition.properties.find(_.name == a).map(prop => s"_.$a${if (prop.isBoolean) ".asOption" else ""}").get
+              typeDef.schema.properties
+                .find(_.name == a)
+                .map(prop => s"_.$a${if (prop.isBoolean) ".asOption" else ""}")
+                .get
             }).mkString("Set(", ",", ")"))
-            .mkString("Seq(", ",", ")")},"${definition.alternatives
+            .mkString("Seq(", ",", ")")},"${typeDef.schema.alternatives
             .map(_.mkString("{", ",", "}"))
             .mkString("[", ",", "]")}")"""
     validators.mkString(",\n  ")
   }
 
   def generateValueValidator(
-    property: Definition,
+    property: Schema,
     context: ScalaCodeRendererContext,
     isMandatory: Boolean = false,
-    extractProperty: Boolean = true): Option[String] = {
+    extractProperty: Boolean = true)(
+    implicit typeResolver: TypeResolver,
+    typeNameProvider: TypeNameProvider): Option[String] = {
     val propertyReference = if (extractProperty) s"_.${property.name}" else "_"
     val propertyExtractor = if (extractProperty) s"_.${property.name}" else "identity"
     property match {
-      case s: StringDefinition =>
+      case s: StringSchema =>
         if (s.enum.isDefined) Some(s"""  check($propertyReference.isOneOf(${context.commonReference(s"Seq(${s.enum.get
           .mkString("\"", "\",\"", "\"")})")}), "Invalid ${property.name}, does not match allowed values")""")
         else if (s.pattern.isDefined)
@@ -397,7 +451,7 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
             s"""  check($propertyReference.lengthMax(${s.maxLength.get}),"Invalid length of ${property.name}, maximum length should be ${s.maxLength.get}")""")
         else None
 
-      case n: NumberDefinition =>
+      case n: NumberSchema =>
         (n.minimum, n.maximum, n.multipleOf) match {
           case (Some(min), Some(max), mlt) =>
             Some(s"""  check($propertyReference.inRange(BigDecimal($min),BigDecimal($max),${mlt.map(a =>
@@ -411,12 +465,12 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
           case _ => None
         }
 
-      case a: ArrayDefinition =>
+      case a: ArraySchema =>
         val itemValidator: Option[String] = (a.item match {
-          case o: ObjectDefinition => Some(s"""${typeName(o)}.validate""")
-          case x                   => generateValueValidator(x, context)
+          case o: ObjectSchema => Some(s"""${typeNameProvider.toTypeName(o)}.validate""")
+          case x               => generateValueValidator(x, context)
         }).map(vv =>
-          if (property.isMandatory || isMandatory) s""" checkEach($propertyExtractor, $vv)"""
+          if (property.mandatory || isMandatory) s""" checkEach($propertyExtractor, $vv)"""
           else s"""  checkEachIfSome($propertyExtractor, $vv)""")
         val minValidatorOpt = a.minItems.map(min =>
           s"""   check(_.size >= $min,"Invalid array size, must be greater than or equal to $min")""")
@@ -428,63 +482,63 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
             .mkString(",")})""")
         else itemValidator
 
-      case _: ObjectDefinition =>
-        if (property.isMandatory || isMandatory)
-          Some(s""" checkProperty($propertyExtractor, ${typeName(property)}.validate)""")
-        else Some(s"""  checkIfSome($propertyExtractor, ${typeName(property)}.validate)""")
+      case _: ObjectSchema =>
+        if (property.mandatory || isMandatory)
+          Some(s""" checkProperty($propertyExtractor, ${typeNameProvider.toTypeName(property)}.validate)""")
+        else Some(s"""  checkIfSome($propertyExtractor, ${typeNameProvider.toTypeName(property)}.validate)""")
 
-      case o: OneOfDefinition =>
+      case o: OneOfSchema =>
         if (o.variants.isEmpty) None
-        else if (o.variants.size == 1) generateValueValidator(o.variants.head, context, o.isMandatory)
+        else if (o.variants.size == 1) generateValueValidator(o.variants.head, context, o.mandatory)
         else
           o.variants.head match {
-            case _: ObjectDefinition =>
-              if (property.isMandatory || isMandatory)
-                Some(s""" checkProperty($propertyExtractor, ${typeName(property)}.validate)""")
-              else Some(s"""  checkIfSome($propertyExtractor, ${typeName(property)}.validate)""")
+            case _: ObjectSchema =>
+              if (property.mandatory || isMandatory)
+                Some(s""" checkProperty($propertyExtractor, ${typeNameProvider.toTypeName(property)}.validate)""")
+              else Some(s"""  checkIfSome($propertyExtractor, ${typeNameProvider.toTypeName(property)}.validate)""")
             case _ =>
-              generateValueValidator(o.variants.head, context, o.isMandatory)
+              generateValueValidator(o.variants.head, context, o.mandatory)
           }
 
-      case _: BooleanDefinition => None
-      case _: ExternalDefinition =>
-        if (property.isMandatory || isMandatory)
-          Some(s""" checkProperty($propertyExtractor, ${typeName(property)}.validate)""")
-        else Some(s"""  checkIfSome($propertyExtractor, ${typeName(property)}.validate)""")
+      case _: BooleanSchema => None
+      case _: ExternalReference =>
+        if (property.mandatory || isMandatory)
+          Some(s""" checkProperty($propertyExtractor, ${typeNameProvider.toTypeName(property)}.validate)""")
+        else Some(s"""  checkIfSome($propertyExtractor, ${typeNameProvider.toTypeName(property)}.validate)""")
     }
   }
 
-  def generateValueValidatorCall(
-    property: Definition,
-    context: ScalaCodeRendererContext,
-    isMandatory: Boolean = false): Option[String] =
+  def generateValueValidatorCall(property: Schema, context: ScalaCodeRendererContext, isMandatory: Boolean = false)(
+    implicit typeNameProvider: TypeNameProvider): Option[String] =
     property match {
-      case d: Definition if d.shallBeValidated =>
-        Some(s"""  checkProperty(_.${safeName(property.name)}, ${property.name}Validator)""")
+      case d: Schema if d.validate =>
+        Some(s"""  checkProperty(_.${typeNameProvider.safe(property.name)}, ${property.name}Validator)""")
       case _ => None
     }
 
-  def generateSanitizerList(definition: ObjectDefinition): String = {
-    val simpleSanitizerList = definition.properties
-      .filter(p => !(p.isMandatory && p.isPrimitive) && !definition.alternatives.exists(_.contains(p.name)))
+  def generateSanitizerList(typeDef: TypeDefinition): String = {
+    val simpleSanitizerList = typeDef.schema.properties
+      .filter(p => !(p.mandatory && p.isPrimitive) && !typeDef.schema.alternatives.exists(_.contains(p.name)))
       .take(maxNumberOfArgs)
       .map(prop => s"${prop.name}Sanitizer")
     val sanitizerList =
-      if (definition.alternatives.isEmpty) simpleSanitizerList
+      if (typeDef.schema.alternatives.isEmpty) simpleSanitizerList
       else
-        simpleSanitizerList :+ s"${generateComposedFieldName(definition.alternatives.map(_.head), "Or")}AlternativeSanitizer"
+        simpleSanitizerList :+ s"${generateComposedFieldName(typeDef.schema.alternatives.map(_.head), "Or")}AlternativeSanitizer"
     sanitizerList.mkString(",\n  ")
   }
 
   def generateComposedFieldName(parts: Seq[String], sep: String): String =
     (parts.head +: parts.tail.map(p => p.take(1).toUpperCase + p.drop(1))).mkString(sep)
 
-  def generateSanitizers(definition: ObjectDefinition, context: ScalaCodeRendererContext): Seq[Option[ScalaCode]] = {
-    val simpleSanitizers: Seq[Option[ScalaCode]] = definition.properties
+  def generateSanitizers(typeDef: TypeDefinition, context: ScalaCodeRendererContext)(
+    implicit typeResolver: TypeResolver,
+    typeNameProvider: TypeNameProvider): Seq[Option[ScalaCode]] = {
+    val simpleSanitizers: Seq[Option[ScalaCode]] = typeDef.schema.properties
       .take(maxNumberOfArgs)
       .toList
       .map(prop =>
-        if (prop.isMandatory) {
+        if (prop.mandatory) {
           if (prop.isPrimitive) None
           else
             Some(
@@ -492,19 +546,26 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
                 name = s"${prop.name}Sanitizer",
                 returnType = "Update",
                 body = Seq(s"""seed => entity =>
-                              |    entity.copy(${safeName(prop.name)} = ${prop match {
-                                case o: ObjectDefinition =>
-                                  s"${typeName(o)}.sanitize(seed)(entity.${safeName(prop.name)})"
-                                case a: ArrayDefinition if !a.item.isPrimitive =>
-                                  s"entity.${safeName(prop.name)}.map(item => ${typeName(a.item)}.sanitize(seed)(item))"
-                                case o: OneOfDefinition if o.variants.nonEmpty && !o.variants.head.isPrimitive =>
+                              |    entity.copy(${typeNameProvider.safe(prop.name)} = ${prop match {
+                                case o: ObjectSchema =>
+                                  s"${typeNameProvider.toTypeName(o)}.sanitize(seed)(entity.${typeNameProvider
+                                    .safe(prop.name)})"
+                                case a: ArraySchema if !a.item.isPrimitive =>
+                                  s"entity.${typeNameProvider.safe(prop.name)}.map(item => ${typeNameProvider
+                                    .toTypeName(a.item)}.sanitize(seed)(item))"
+                                case o: OneOfSchema if o.variants.nonEmpty && !o.variants.head.isPrimitive =>
                                   if (o.variants.size == 1)
-                                    s"${typeName(o.variants.head)}.sanitize(seed)(entity.${safeName(prop.name)})"
+                                    s"${typeNameProvider.toTypeName(o.variants.head)}.sanitize(seed)(entity.${typeNameProvider
+                                      .safe(prop.name)})"
                                   else
                                     o.variants
-                                      .map(v => s"case x:${typeName(v)} => ${typeName(v)}.sanitize(seed)(x)")
-                                      .mkString(s"entity.${safeName(prop.name)} match {\n  ", "\n  ", "\n}")
-                                case _ => s"entity.${safeName(prop.name)}"
+                                      .map(v =>
+                                        s"case x:${typeNameProvider.toTypeName(v)} => ${typeNameProvider.toTypeName(v)}.sanitize(seed)(x)")
+                                      .mkString(
+                                        s"entity.${typeNameProvider.safe(prop.name)} match {\n  ",
+                                        "\n  ",
+                                        "\n}")
+                                case _ => s"entity.${typeNameProvider.safe(prop.name)}"
                               }})
          """.stripMargin)
               ))
@@ -513,53 +574,59 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
             name = s"${prop.name}Sanitizer",
             returnType = "Update",
             body = Seq(if (prop.isPrimitive) {
-              if (prop.shallBeValidated)
+              if (prop.validate)
                 s"""seed => entity =>
                    |    entity.copy(${prop.name} = ${prop.name}Validator(entity.${prop.name}).fold(_ => None, _ => entity.${prop.name})
-                   |      .orElse(Generator.get(${generateValueGenerator(prop, context, wrapOption = false)})(seed)))
+                   |      .orElse(Generator.get(${generateValueGenerator(typeDef, prop, context, wrapOption = false)})(seed)))
                    """.stripMargin
               else
                 s"""seed => entity =>
                    |    entity.copy(${prop.name} = Generator.get(${generateValueGenerator(
+                     typeDef,
                      prop,
                      context,
                      wrapOption = false)})(seed))
            """.stripMargin
             } else
               s"""seed => entity =>
-                 |    entity.copy(${safeName(prop.name)} = entity.${safeName(prop.name)}
-                 |      .orElse(Generator.get(${generateValueGenerator(prop, context, wrapOption = false)})(seed))${generateSanitizerSuffix(
+                 |    entity.copy(${typeNameProvider.safe(prop.name)} = entity.${typeNameProvider.safe(prop.name)}
+                 |      .orElse(Generator.get(${generateValueGenerator(typeDef, prop, context, wrapOption = false)})(seed))${generateSanitizerSuffix(
                    prop)})
            """.stripMargin)
           )))
 
-    if (definition.alternatives.isEmpty) simpleSanitizers
-    else simpleSanitizers ++ generateAlternativeSanitizers(definition, context)
+    if (typeDef.schema.alternatives.isEmpty) simpleSanitizers
+    else simpleSanitizers ++ generateAlternativeSanitizers(typeDef, context)
   }
 
-  def generateAlternativeSanitizers(
-    definition: ObjectDefinition,
-    context: ScalaCodeRendererContext): Seq[Option[ScalaCode]] = {
+  def generateAlternativeSanitizers(typeDef: TypeDefinition, context: ScalaCodeRendererContext)(
+    implicit typeResolver: TypeResolver,
+    typeNameProvider: TypeNameProvider): Seq[Option[ScalaCode]] = {
 
-    val compoundSanitizers: Seq[Option[ScalaCode]] = definition.alternatives.toList
-      .map(set =>
-        generateCompoundSanitizer(definition, set, definition.alternatives.filterNot(_ == set).reduce(_ ++ _), context))
+    val compoundSanitizers: Seq[Option[ScalaCode]] = typeDef.schema.alternatives.toList
+      .map(
+        set =>
+          generateCompoundSanitizer(
+            typeDef,
+            set,
+            typeDef.schema.alternatives.filterNot(_ == set).reduce(_ ++ _),
+            context))
 
     compoundSanitizers :+ Some(
       ValueDefinition(
-        name = s"${generateComposedFieldName(definition.alternatives.map(_.head), "Or")}AlternativeSanitizer",
+        name = s"${generateComposedFieldName(typeDef.schema.alternatives.map(_.head), "Or")}AlternativeSanitizer",
         returnType = "Update",
         body = Seq(
           s"""seed => entity =>
-             |          ${definition.alternatives
+             |          ${typeDef.schema.alternatives
                .map(set =>
                  s"if(entity.${set.head}.isDefined) ${generateComposedFieldName(set.toSeq, "And")}CompoundSanitizer(seed)(entity)")
                .mkString("\nelse      ")}
-             |          else Generator.get(Gen.chooseNum(0,${definition.alternatives.size - 1}))(seed) match {
-             |      ${definition.alternatives.zipWithIndex
+             |          else Generator.get(Gen.chooseNum(0,${typeDef.schema.alternatives.size - 1}))(seed) match {
+             |      ${typeDef.schema.alternatives.zipWithIndex
                .map {
                  case (set, i) =>
-                   s"case ${if (i == definition.alternatives.size - 1) "_" else s"Some($i)"} => ${generateComposedFieldName(set.toSeq, "And")}CompoundSanitizer(seed)(entity)"
+                   s"case ${if (i == typeDef.schema.alternatives.size - 1) "_" else s"Some($i)"} => ${generateComposedFieldName(set.toSeq, "And")}CompoundSanitizer(seed)(entity)"
                }
                .mkString("\n      ")}
              |    }
@@ -568,10 +635,12 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
   }
 
   def generateCompoundSanitizer(
-    definition: ObjectDefinition,
+    typeDef: TypeDefinition,
     included: Set[String],
     excluded: Set[String],
-    context: ScalaCodeRendererContext): Option[ScalaCode] =
+    context: ScalaCodeRendererContext)(
+    implicit typeResolver: TypeResolver,
+    typeNameProvider: TypeNameProvider): Option[ScalaCode] =
     Some(
       ValueDefinition(
         name = s"${generateComposedFieldName(included.toSeq, "And")}CompoundSanitizer",
@@ -581,7 +650,7 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
                       |      entity.copy(
                       |        ${included
                         .map(name => {
-                          definition.properties
+                          typeDef.schema.properties
                             .find(_.name == name)
                             .map(
                               prop =>
@@ -589,6 +658,7 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
                                   s"""$name = true"""
                                 else
                                   s"""$name = entity.$name.orElse(Generator.get(${generateValueGenerator(
+                                    typeDef,
                                     prop,
                                     context,
                                     wrapOption = false)})(seed))${generateSanitizerSuffix(prop)}""")
@@ -597,7 +667,7 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
                         .mkString(",\n        ")}
                       |       ${excluded
                         .map(name => {
-                          definition.properties
+                          typeDef.schema.properties
                             .find(_.name == name)
                             .map(
                               prop =>
@@ -611,16 +681,18 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
                       |   )""".stripMargin)
       ))
 
-  def generateSanitizerSuffix(definition: Definition): String = definition match {
-    case a: ArrayDefinition  => s".map(_.map(${typeName(a.item)}.sanitize(seed)))"
-    case o: ObjectDefinition => s".map(${typeName(o)}.sanitize(seed))"
-    case o: OneOfDefinition =>
-      if (o.variants.isEmpty) ""
-      else if (o.variants.size == 1) generateSanitizerSuffix(o.variants.head)
-      else
-        s""".map(${typeName(o)}.sanitize(seed))"""
-    case _ => ""
-  }
+  def generateSanitizerSuffix(
+    schema: Schema)(implicit typeResolver: TypeResolver, typeNameProvider: TypeNameProvider): String =
+    schema match {
+      case a: ArraySchema  => s".map(_.map(${typeNameProvider.toTypeName(a.item)}.sanitize(seed)))"
+      case o: ObjectSchema => s".map(${typeNameProvider.toTypeName(o)}.sanitize(seed))"
+      case o: OneOfSchema =>
+        if (o.variants.isEmpty) ""
+        else if (o.variants.size == 1) generateSanitizerSuffix(o.variants.head)
+        else
+          s""".map(${typeNameProvider.toTypeName(o)}.sanitize(seed))"""
+      case _ => ""
+    }
 
   def generateGenerators(
     typeDef: TypeDefinition,
@@ -763,36 +835,5 @@ object JsonSchema2ScalaCodeRenderer extends JsonSchema2CodeRenderer with KnownFi
             returnType = s"Format[${typeDef.name}]",
             body = Seq("Json.format[${typeDef.name}]"),
             modifier = Some("implicit"))))
-
-  override def typeOf(
-    definition: Definition,
-    prefix: String,
-    wrapOption: Boolean = true,
-    defaultValue: Boolean = true): String = {
-    val name = definition match {
-      case _: StringDefinition  => "String"
-      case _: NumberDefinition  => "BigDecimal"
-      case _: BooleanDefinition => "Boolean"
-      case a: ArrayDefinition   => s"Seq[${typeOf(a.item, prefix, wrapOption = false, defaultValue = false)}]"
-      case o: ObjectDefinition  => s"${if (o.isRef) "" else prefix}${typeName(o)}"
-      case o: OneOfDefinition =>
-        if (o.variants.isEmpty) "Nothing"
-        else if (o.variants.size == 1) typeOf(o.variants.head, prefix, wrapOption = false)
-        else if (o.variants.forall(_.isPrimitive)) "AnyVal"
-        else if (o.variants.forall(v => !v.isPrimitive)) s"${if (o.isRef) "" else prefix}${typeName(o)}"
-        else "Any"
-      case e: ExternalDefinition =>
-        e.`type` match {
-          case Some("object")  => s"${if (e.isRef) "" else prefix}${typeName(e)}"
-          case Some("string")  => "String"
-          case Some("number")  => "BigDecimal"
-          case Some("boolean") => "Boolean"
-          case Some(t)         => throw new Exception(s"Unsupported reference type $t")
-          case None            => throw new Exception(s"Missing reference type")
-        }
-    }
-    if (!definition.isMandatory && wrapOption) s"Option[$name]${if (defaultValue) " = None" else ""}"
-    else { s"""$name${if (defaultValue && definition.isBoolean) " = false" else ""}""" }
-  }
 
 }

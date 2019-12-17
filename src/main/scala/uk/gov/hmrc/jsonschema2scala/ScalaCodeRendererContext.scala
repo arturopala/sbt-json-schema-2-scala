@@ -16,16 +16,16 @@
 
 package uk.gov.hmrc.jsonschema2scala
 
-import uk.gov.hmrc.jsonschema2scala.JsonSchema._
+import uk.gov.hmrc.jsonschema2scala.schema.{ArraySchema, ObjectSchema, OneOfSchema, Schema, StringSchema}
 
 object ScalaCodeRendererContext extends CodeRendererUtils {
 
-  def apply(definition: Definition, options: JsonSchema2ScalaOptions): ScalaCodeRendererContext = {
+  def apply(schema: Schema, options: ScalaCodeRendererOptions): ScalaCodeRendererContext = {
 
-    val uniqueKey = findUniqueKey(definition)
-    val keys = findKeys(definition)
+    val uniqueKey = findUniqueKey(schema)
+    val keys = findKeys(schema)
 
-    val externalizedStrings = mapCommonVals(definition, Map.empty.withDefaultValue(Nil))
+    val externalizedStrings = mapCommonVals(schema, Map.empty.withDefaultValue(Nil))
       .mapValues(list => {
         list.map(_.replaceAll("\\d", "")).distinct.minBy(_.length)
       })
@@ -36,36 +36,36 @@ object ScalaCodeRendererContext extends CodeRendererUtils {
     ScalaCodeRendererContext(options, uniqueKey, keys, externalizedStrings)
   }
 
-  private def findUniqueKey(definition: Definition, path: List[Definition] = Nil): Option[(String, String)] =
+  private def findUniqueKey(definition: Schema, path: List[Schema] = Nil): Option[(String, String)] =
     definition match {
-      case s: StringDefinition => if (s.isUniqueKey) Some((accessorFor(s :: path), s.name)) else None
-      case o: ObjectDefinition =>
+      case s: StringSchema => if (s.isUniqueKey) Some((accessorFor(s :: path), s.name)) else None
+      case o: ObjectSchema =>
         o.properties.foldLeft[Option[(String, String)]](None)((a, p) => a.orElse(findUniqueKey(p, o :: path)))
       case _ => None
     }
 
-  private def findKeys(definition: Definition, path: List[Definition] = Nil): Seq[(String, String)] =
+  private def findKeys(definition: Schema, path: List[Schema] = Nil): Seq[(String, String)] =
     definition match {
-      case s: StringDefinition => if (s.isKey) Seq((accessorFor(s :: path), s.name)) else Seq.empty
-      case o: ObjectDefinition =>
+      case s: StringSchema => if (s.isKey) Seq((accessorFor(s :: path), s.name)) else Seq.empty
+      case o: ObjectSchema =>
         o.properties.map(findKeys(_, o :: path)).reduce(_ ++ _)
       case _ => Seq.empty
     }
 
-  private def accessorFor(path: List[Definition], nested: String = "", option: Boolean = false): String = path match {
-    case (o: ObjectDefinition) :: xs =>
+  private def accessorFor(path: List[Schema], nested: String = "", option: Boolean = false): String = path match {
+    case (o: ObjectSchema) :: xs =>
       val prefix =
         if (o.name.isEmpty) ""
-        else if (o.isMandatory) s"${safeName(o.name)}."
+        else if (o.mandatory) s"${ScalaTypeNameProvider.safe(o.name)}."
         else s"${o.name}.${if (option) "flatMap" else "map"}(_."
-      val suffix = if (o.name.isEmpty) "" else if (!o.isMandatory) ")" else ""
-      accessorFor(xs, prefix + nested + suffix, !o.isMandatory || option)
-    case (s: Definition) :: xs =>
-      accessorFor(xs, s.name, !s.isMandatory)
+      val suffix = if (o.name.isEmpty) "" else if (!o.mandatory) ")" else ""
+      accessorFor(xs, prefix + nested + suffix, !o.mandatory || option)
+    case (s: Schema) :: xs =>
+      accessorFor(xs, s.name, !s.mandatory)
     case Nil => if (option) nested else s"Option($nested)"
   }
 
-  private def externalizePattern(s: StringDefinition, map: Map[String, List[String]]): Map[String, List[String]] =
+  private def externalizePattern(s: StringSchema, map: Map[String, List[String]]): Map[String, List[String]] =
     s.pattern
       .map(p => {
         val key = quoted(p)
@@ -76,7 +76,7 @@ object ScalaCodeRendererContext extends CodeRendererUtils {
       })
       .getOrElse(map)
 
-  private def externalizeEnum(s: StringDefinition, map: Map[String, List[String]]): Map[String, List[String]] =
+  private def externalizeEnum(s: StringSchema, map: Map[String, List[String]]): Map[String, List[String]] =
     s.enum
       .map(e => {
         val key = s"""Seq(${e.mkString("\"", "\",\"", "\"")})"""
@@ -87,21 +87,21 @@ object ScalaCodeRendererContext extends CodeRendererUtils {
       })
       .getOrElse(map)
 
-  private def mapCommonVals(definition: Definition, map: Map[String, List[String]]): Map[String, List[String]] =
+  private def mapCommonVals(definition: Schema, map: Map[String, List[String]]): Map[String, List[String]] =
     definition match {
-      case s: StringDefinition => externalizePattern(s, map) ++ externalizeEnum(s, map)
-      case o: ObjectDefinition =>
+      case s: StringSchema => externalizePattern(s, map) ++ externalizeEnum(s, map)
+      case o: ObjectSchema =>
         o.properties.foldLeft(map)((m, p) => mapCommonVals(p, m))
-      case o: OneOfDefinition =>
+      case o: OneOfSchema =>
         o.variants.foldLeft(map)((m, p) => mapCommonVals(p, m))
-      case a: ArrayDefinition =>
+      case a: ArraySchema =>
         mapCommonVals(a.item, map)
       case _ => map
     }
 }
 
 case class ScalaCodeRendererContext(
-  options: JsonSchema2ScalaOptions,
+  options: ScalaCodeRendererOptions,
   uniqueKey: Option[(String, String)],
   keys: Seq[(String, String)],
   commonVals: Map[String, String]) {

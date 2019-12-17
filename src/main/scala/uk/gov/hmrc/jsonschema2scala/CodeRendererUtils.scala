@@ -18,50 +18,6 @@ package uk.gov.hmrc.jsonschema2scala
 
 trait CodeRendererUtils {
 
-  val scalaKeywords: Set[String] = Set(
-    "abstract",
-    "case",
-    "catch",
-    "class",
-    "def",
-    "do",
-    "else",
-    "extends",
-    "false",
-    "final",
-    "finally",
-    "for",
-    "forSome",
-    "if",
-    "implicit",
-    "import",
-    "lazy",
-    "match",
-    "new",
-    "Null",
-    "object",
-    "override",
-    "package",
-    "private",
-    "protected",
-    "return",
-    "sealed",
-    "super",
-    "this",
-    "throw",
-    "trait",
-    "try",
-    "true",
-    "type",
-    "val",
-    "var",
-    "while",
-    "with",
-    "yield"
-  )
-
-  def safeName(name: String): String = if (name.contains("-") || scalaKeywords.contains(name)) s"`$name`" else name
-
   def quoted(s: String): String = "\"\"\"" + s + "\"\"\""
 
   def defined[A]: PartialFunction[Option[A], A] = { case Some(x) => x }
