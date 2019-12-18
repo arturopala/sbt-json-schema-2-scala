@@ -32,8 +32,14 @@ object TypeDefinitionsBuilder {
     else if (types.size == 1) Right(types.head)
     else {
       types.find(_.name == schema.name) match {
-        case Some(typeDef) =>
-          Right(typeDef.copy(nestedTypes = typeDef.nestedTypes ++ types.filterNot(_ == typeDef)))
+
+        case Some(typeDef) => {
+          val embeddedTypes: Seq[TypeDefinition] = types
+            .filterNot(_ == typeDef)
+            .map(TypeDefinition.modifyPath(prependIfMissing(typeDef.name)))
+
+          Right(typeDef.copy(nestedTypes = typeDef.nestedTypes ++ embeddedTypes))
+        }
 
         case None =>
           Right(
@@ -54,25 +60,33 @@ object TypeDefinitionsBuilder {
   def processSchema(name: String, path: List[String], schema: Schema)(
     implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] = {
 
-    lazy val templates = processTemplates(path.headOption.getOrElse(name), safeTail(path), schema)
+    lazy val templates: Seq[TypeDefinition] =
+      processTemplates(path.headOption.getOrElse(name), safeTail(path), schema)
 
     val types: Seq[TypeDefinition] = schema match {
-      case objectSchema: ObjectSchema => processObjectSchema(name, path, objectSchema)
-      case oneOfSchema: OneOfSchema   => processOneOfSchema(name, path, oneOfSchema) ++ templates
-      case arraySchema: ArraySchema   => processArraySchema(name, path, arraySchema) ++ templates
-      case mapSchema: MapSchema       => processMapSchema(name, path, mapSchema) ++ templates
-      case _                          => templates
+      case objectSchema: ObjectSchema        => processObjectSchema(name, path, objectSchema)
+      case oneOfSchema: OneOfSchema          => processOneOfSchema(name, path, oneOfSchema) ++ templates
+      case arraySchema: ArraySchema          => processArraySchema(name, path, arraySchema) ++ templates
+      case mapSchema: MapSchema              => processMapSchema(name, path, mapSchema) ++ templates
+      case external: ExternalSchemaReference => processExternalSchemaReference(name, path, external) ++ templates
+      case _                                 => templates
     }
 
     types
   }
 
-  def processSchemaReferences(name: String, path: List[String], schema: Schema)(
+  def processInternalSchemaReference(name: String, path: List[String], schema: Schema)(
     implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] = schema match {
 
     case internalReference: InternalSchemaReference =>
       processSchema(typeNameProvider.toTypeName(internalReference.schema), Nil, internalReference.schema)
         .map(_.copy(forReferenceOnly = true))
+
+    case _ => Seq.empty
+  }
+
+  def processExternalSchemaReference(name: String, path: List[String], schema: Schema)(
+    implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] = schema match {
 
     case externalReference: ExternalSchemaReference =>
       processSchema(typeNameProvider.toTypeName(externalReference.schema), Nil, externalReference.schema)
@@ -152,10 +166,9 @@ object TypeDefinitionsBuilder {
                   typeNameProvider.toTypeNameVariant(schema, pos)
                 } else typeNameProvider.toTypeName(schema)
 
-              processSchema(subtypeNameVariant, name :: path, schema) ++ processSchemaReferences(
-                subtypeNameVariant,
-                name :: path,
-                schema)
+              processSchema(subtypeNameVariant, name :: path, schema) ++
+                processInternalSchemaReference(subtypeNameVariant, name :: path, schema) ++
+                processExternalSchemaReference(subtypeNameVariant, name :: path, schema)
             }
           }
         // New interface type to span over multiple oneOf variants
@@ -224,6 +237,13 @@ object TypeDefinitionsBuilder {
   def safeTail[T](list: List[T]): List[T] = list match {
     case Nil     => Nil
     case _ :: xs => xs
+  }
+
+  def prependIfMissing(name: String): List[String] => List[String] = { path =>
+    path.reverse match {
+      case Nil     => name :: Nil
+      case x :: xs => if (x == name) path else (name :: x :: xs).reverse
+    }
   }
 
   case class Counter(initial: Int = 0) {

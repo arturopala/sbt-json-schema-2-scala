@@ -89,7 +89,9 @@ object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with Cod
   }
 
   def computeTypesTree(typeDef: TypeDefinition, level: Int): Seq[(String, Int)] =
-    Seq((typeDef.name, level)) ++ typeDef.nestedTypes.flatMap(computeTypesTree(_, level + 1))
+    Seq((typeDef.name, level)) ++ typeDef.nestedTypes
+      .filterNot(_.forReferenceOnly)
+      .flatMap(computeTypesTree(_, level + 1))
 
   def generateTypeDefinition(typeDef: TypeDefinition, isTopLevel: Boolean, context: ScalaCodeRendererContext)(
     implicit typeResolver: TypeResolver,
@@ -120,6 +122,7 @@ object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with Cod
       if (isTopLevel) generateCustomObjectDeclaration(context) else Seq.empty
 
     lazy val nestedTypesDefinitions: Seq[Option[ScalaCode]] = typeDef.nestedTypes
+      .filterNot(_.forReferenceOnly)
       .flatMap(t => generateTypeDefinition(t, isTopLevel = false, context))
 
     lazy val objectMembersCode: Seq[Option[ScalaCode]] = if (isTopLevel) {

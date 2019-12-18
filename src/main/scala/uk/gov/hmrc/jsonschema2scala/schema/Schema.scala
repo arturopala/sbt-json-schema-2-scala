@@ -37,7 +37,7 @@ sealed trait Schema {
   val isPrimitive: Boolean = true
   val isBoolean: Boolean = false
 
-  val uri: String = Schema.toUri(path)
+  val uri: String = Schema.pathToUri(path)
 }
 
 case class SchemaCommon(definitions: Seq[Schema] = Seq.empty)
@@ -303,12 +303,11 @@ object Schema {
       case None =>
         (json \ "$ref").asOpt[String] match {
           case Some(reference) =>
-            val path3 = reference.split("/").reverse.toList
-            val path2 = referenceResolver.parse(reference)
+            val path2 = referenceResolver.uriToPath(reference)
             referenceResolver
               .lookup(reference, readSchema(_, path2, _, description = desc, requiredFields, referenceResolver)) match {
               case Some(referencedSchema) =>
-                if (reference.startsWith("#/")) {
+                if (referenceResolver.isInternal(referencedSchema.uri)) {
                   if (referencedSchema.isPrimitive) Schema.copy(referencedSchema, name, "$ref" :: path, description)
                   else
                     InternalSchemaReference(
@@ -682,8 +681,8 @@ object Schema {
             .map(_._1)
             .distinct
             .map(name => {
-              val uri = toUri(name :: propertyName :: path)
-              val path2 = referenceResolver.parse(uri)
+              val uri = pathToUri(name :: propertyName :: path)
+              val path2 = referenceResolver.uriToPath(uri)
               referenceResolver
                 .lookup(uri, readSchema(_, path2, _, description, Seq.empty, referenceResolver))
             })
@@ -732,7 +731,7 @@ object Schema {
       s.copy(name = name, path = path, description = description.orElse(schema.description))
   }
 
-  def toUri(path: List[String]): String = path.reverse.filterNot(_.isEmpty) match {
+  def pathToUri(path: List[String]): String = path.reverse.filterNot(_.isEmpty) match {
     case Nil     => ""
     case x :: xs => (if (x == "#") "#/" else x) + xs.mkString("/")
   }
