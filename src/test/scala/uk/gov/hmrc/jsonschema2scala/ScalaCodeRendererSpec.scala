@@ -215,7 +215,7 @@ class ScalaCodeRendererSpec
                                  |}
                                """.stripMargin)
 
-    "render a simple schema containing oneOf alternative object values" in
+    "render a simple object schema containing oneOf alternative object values" in
       assertCanParseAndCompile("""
                                  |{
                                  |  "$id": "http://example.com/test.json",
@@ -258,6 +258,44 @@ class ScalaCodeRendererSpec
                                  |  "required": [ "aba" ]
                                  |}
                                """.stripMargin)
+
+    "render a top level oneOf schema" in
+      assertCanParseAndCompile("""{
+                                 |  "$id": "http://example.com/test.json",
+                                 |  "description": "A test schema",
+                                 |  "oneOf": [
+                                 |    {
+                                 |      "description": "First option",
+                                 |      "$ref": "#/$defs/one"
+                                 |    },
+                                 |    {
+                                 |      "description": "Second option",
+                                 |      "properties": {
+                                 |        "foo": {
+                                 |          "type": "integer"
+                                 |        },
+                                 |        "ver": {
+                                 |          "type": "number"
+                                 |        },
+                                 |        "ref": {
+                                 |          "$ref": "#/$defs/one"
+                                 |        }
+                                 |      }
+                                 |    }
+                                 |  ],
+                                 |  "$defs": {
+                                 |    "one": {
+                                 |      "properties": {
+                                 |        "foo": {
+                                 |          "type": "integer"
+                                 |        },
+                                 |        "ver": {
+                                 |          "type": "string"
+                                 |        }
+                                 |      }
+                                 |    }
+                                 |  }
+                                 |}""".stripMargin)
 
     "render a simple schema containing oneOf alternative object and primitive values" in
       assertCanParseAndCompile("""

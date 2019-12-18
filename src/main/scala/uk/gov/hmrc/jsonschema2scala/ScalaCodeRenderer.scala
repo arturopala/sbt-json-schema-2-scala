@@ -27,18 +27,25 @@ object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with Cod
   override type CodeRendererOptions = ScalaCodeRendererOptions
 
   override def render(schema: Schema, options: ScalaCodeRendererOptions, description: String): CodeRenderingResult = {
+
     implicit val typeNameProvider: TypeNameProvider = ScalaTypeNameProvider
 
-    val types: Seq[TypeDefinition] = TypeDefinitionsBuilder.buildFrom(schema)
-    val schemaUrlToTypePath: Map[String, List[String]] = types.flatMap(TypeDefinition.listSchemaUrlToTypePath).toMap
-    val schemaUrlToTypeInterfaces: Map[String, Seq[List[String]]] =
-      types.flatMap(TypeDefinition.listSchemaUrlToTypeInterfaces).groupBy(_._1).mapValues(_.flatMap(_._2))
+    TypeDefinitionsBuilder
+      .buildFrom(schema)
+      .fold(
+        errors => Left(errors),
+        typeDef => {
 
-    implicit val typeResolver: TypeResolver = new ScalaTypeResolver(schemaUrlToTypePath, schemaUrlToTypeInterfaces)
+          val schemaUrlToTypePath: Map[String, List[String]] = TypeDefinition.listSchemaUrlToTypePath(typeDef).toMap
+          val schemaUrlToTypeInterfaces: Map[String, Seq[List[String]]] =
+            TypeDefinition.listSchemaUrlToTypeInterfaces(typeDef).groupBy(_._1).mapValues(_.flatMap(_._2))
 
-    types
-      .map(typeDef => render(typeDef, options, ScalaCodeRendererContext(schema, options), description))
-      .fold(Right(Seq.empty))(EitherX.combine[List[String], Seq[Code]](_ ++ _, _ ++ _))
+          implicit val typeResolver: TypeResolver =
+            new ScalaTypeResolver(schemaUrlToTypePath, schemaUrlToTypeInterfaces)
+
+          render(typeDef, options, ScalaCodeRendererContext(schema, options), description)
+        }
+      )
   }
 
   def render(
