@@ -37,7 +37,7 @@ import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpec}
 class ScalaCodeRendererSpec
     extends WordSpec with Matchers with CodeRenderingAssertions with TestSchemas with BeforeAndAfterAll {
 
-  implicit val compiler = Compiler()
+  implicit val compiler: Compiler = Compiler()
 
   override def afterAll(): Unit =
     compiler.cleanup()
@@ -166,7 +166,7 @@ class ScalaCodeRendererSpec
                                  |        "one": {
                                  |            "type": "string"
                                  |        },
-                                 |        "second": {
+                                 |        "secondArray": {
                                  |            "type": "array",
                                  |            "minItems": 1,
                                  |            "items": {

@@ -19,7 +19,8 @@ import java.util.regex.Pattern
 
 import uk.gov.hmrc.jsonschema2scala.schema.Schema
 
-object Names {
+object NameUtils {
+
   final val NORMALIZE_PATTERN = Pattern.compile("""([_/@:$-]+?\w)""")
 
   final def normalize(text: String): String = {
@@ -52,4 +53,9 @@ object Names {
     val name = pathLastPart(definition)
     if (name.endsWith("Type")) name.dropRight(4) else name
   }
+
+  final def singular(name: String): String =
+    if (name.endsWith("Array")) name.substring(0, name.length - 5)
+    else if (name.endsWith("List")) name.substring(0, name.length - 4)
+    else name
 }

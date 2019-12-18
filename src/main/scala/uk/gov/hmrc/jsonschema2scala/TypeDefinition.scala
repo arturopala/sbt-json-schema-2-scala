@@ -15,12 +15,12 @@ case class TypeDefinition(
 
 object TypeDefinition {
 
-  def listSchemaUrlToTypePath(typeDef: TypeDefinition): Seq[(String, List[String])] =
-    Seq((typeDef.schema.url, typeDef.name :: typeDef.path)) ++ typeDef.nestedTypes.flatMap(listSchemaUrlToTypePath)
+  def listSchemaUriToTypePath(typeDef: TypeDefinition): Seq[(String, List[String])] =
+    Seq((typeDef.schema.uri, typeDef.name :: typeDef.path)) ++ typeDef.nestedTypes.flatMap(listSchemaUriToTypePath)
 
-  def listSchemaUrlToTypeInterfaces(typeDef: TypeDefinition): Seq[(String, Seq[List[String]])] =
+  def listSchemaUriToTypeInterfaces(typeDef: TypeDefinition): Seq[(String, Seq[List[String]])] =
     (if (typeDef.isInterface)
-       typeDef.subtypes.filter(_.forReferenceOnly).map(i => (i.schema.url, Seq(typeDef.name :: typeDef.path)))
-     else Seq.empty) ++ typeDef.nestedTypes.flatMap(listSchemaUrlToTypeInterfaces)
+       typeDef.subtypes.filter(_.forReferenceOnly).map(i => (i.schema.uri, Seq(typeDef.name :: typeDef.path)))
+     else Seq.empty) ++ typeDef.nestedTypes.flatMap(listSchemaUriToTypeInterfaces)
 
 }

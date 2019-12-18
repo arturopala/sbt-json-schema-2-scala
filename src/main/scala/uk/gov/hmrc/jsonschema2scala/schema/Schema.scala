@@ -16,7 +16,12 @@
 
 package uk.gov.hmrc.jsonschema2scala.schema
 
+import java.net.URI
+
 import play.api.libs.json._
+import uk.gov.hmrc.jsonschema2scala.NameUtils
+
+import scala.util.Try
 
 sealed trait Schema {
 
@@ -32,15 +37,10 @@ sealed trait Schema {
   val isPrimitive: Boolean = true
   val isBoolean: Boolean = false
 
-  val url: String = path.reverse.mkString("/")
+  val uri: String = Schema.toUri(path)
 }
 
 case class SchemaCommon(definitions: Seq[Schema] = Seq.empty)
-
-case class EmptySchema(name: String, path: List[String], common: SchemaCommon, mandatory: Boolean) extends Schema {
-  override val description: Option[String] = None
-  override def validate: Boolean = false
-}
 
 case class ObjectSchema(
   name: String,
@@ -64,13 +64,13 @@ case class MapSchema(
   common: SchemaCommon = SchemaCommon(),
   description: Option[String] = None,
   mandatory: Boolean = false,
-  properties: Seq[Schema] = Seq.empty,
+  patternProperties: Seq[Schema] = Seq.empty,
   requiredFields: Seq[String] = Seq.empty,
   alternatives: Seq[Set[String]] = Seq.empty)
     extends Schema {
   override val isPrimitive: Boolean = false
   override def validate: Boolean = true
-  def isEmpty: Boolean = properties.isEmpty
+  def isEmpty: Boolean = patternProperties.isEmpty
 }
 
 case class OneOfSchema(
@@ -163,7 +163,7 @@ case class ArraySchema(
   override def validate: Boolean = item.validate || minItems.isDefined || maxItems.isDefined
 }
 
-case class InternalReference(
+case class InternalSchemaReference(
   name: String,
   path: List[String],
   common: SchemaCommon,
@@ -177,7 +177,7 @@ case class InternalReference(
   override def validate: Boolean = schema.validate
 }
 
-case class ExternalReference(
+case class ExternalSchemaReference(
   name: String,
   path: List[String],
   common: SchemaCommon,
@@ -194,184 +194,192 @@ case class ExternalReference(
 object Schema {
 
   def read(name: String, json: JsObject, references: Map[String, SchemaSource]): Schema =
-    read(name, json, Some(SourceMapReferenceResolver(references)))
+    read(URI.create(s"schema://$name"), name, json, Some(SourceMapReferenceResolver(references)))
 
-  val rootPath: List[String] = "#" :: Nil
+  def read(uri: URI, name: String, json: JsObject, references: Map[String, SchemaSource]): Schema =
+    read(uri, name, json, Some(SourceMapReferenceResolver(references)))
 
-  def read(name: String, json: JsObject, externalResolver: Option[SchemaReferenceResolver] = None): Schema =
+  def read(uri: URI, name: String, json: JsObject, externalResolver: Option[SchemaReferenceResolver] = None): Schema =
     readSchema(
       name = name,
-      path = rootPath,
+      currentPath = rootPath(uri),
       json = json,
       requiredFields = Seq(""),
-      referenceResolver = CachingReferenceResolver(json, externalResolver))
+      currentReferenceResolver = CachingReferenceResolver(uri, json, externalResolver)
+    )
 
   def readMultiple(sources: Seq[SchemaSource]): Seq[Schema] = {
     val references: Map[String, SchemaSource] = sources
-      .map(schema => {
-        schema.id.map(id => (id, schema))
-      })
-      .collect { case Some(x) => x }
+      .map(schema => (schema.uri.toString, schema))
       .toMap
-    sources.map(s => read(s.name, s.content, Some(SourceMapReferenceResolver(references))))
+    sources.map(source => read(source.uri, source.name, source.json, Some(SourceMapReferenceResolver(references))))
   }
+
+  def rootPath(uri: URI): List[String] = "#" :: uri.toString :: Nil
 
   def readSchema(
     name: String,
-    path: List[String],
+    currentPath: List[String],
     json: JsObject,
     description: Option[String] = None,
     requiredFields: Seq[String],
-    referenceResolver: SchemaReferenceResolver): Schema = {
+    currentReferenceResolver: SchemaReferenceResolver): Schema = {
 
     val isMandatory = requiredFields.contains(name)
 
-    if (json.fields.isEmpty) EmptySchema(name, path, SchemaCommon(), isMandatory)
-    else {
+    val id: Option[URI] = (json \ "$id")
+      .asOpt[String]
+      .flatMap(s => Try(URI.create(s)).toOption)
+      .map(_.normalize())
 
-      val desc = description.orElse((json \ "description").asOpt[String])
+    val (referenceResolver, path) =
+      id.map(uri => (CachingReferenceResolver(uri, json, Some(currentReferenceResolver)), rootPath(uri)))
+        .getOrElse((currentReferenceResolver, currentPath))
 
-      val definitions: Seq[Schema] = readDefinitions("definitions", name, path, json, description, referenceResolver) ++
-        readDefinitions("$defs", name, path, json, description, referenceResolver)
+    val desc: Option[String] = description.orElse((json \ "description").asOpt[String])
 
-      val common = SchemaCommon(definitions)
-      /*
-       * 6.1. Validation Keywords for Any Instance Type
-       * 6.1.1. type
-       * The value of this keyword MUST be either a string or an array. If it is an array, elements of the array MUST be strings and MUST be unique.
-       *
-       * String values MUST be one of the six primitive types ("null", "boolean", "object", "array", "number", or "string"),
-       * or "integer" which matches any number with a zero fractional part.
-       *
-       * An instance validates if and only if the instance is in any of the sets listed for this keyword.
-       */
-      (json \ "type").asOpt[JsValue] match {
-        case Some(JsString(valueType)) =>
-          valueType match {
-            case "object" =>
-              readObjectSchema(name, path, common, json, desc, isMandatory, referenceResolver)
-            case "string"  => readStringSchema(name, path, common, json, desc, isMandatory)
-            case "number"  => readNumberSchema(name, path, common, json, desc, isMandatory)
-            case "integer" => readIntegerSchema(name, path, common, json, desc, isMandatory)
-            case "boolean" => BooleanSchema(name, path, common, desc, mandatory = true)
-            case "array" =>
-              readArraySchema(name, path, common, json, desc, isMandatory, referenceResolver)
-            case "null" =>
-              readObjectSchema(name, path, common, json, desc, isMandatory, referenceResolver)
-            case other =>
-              throw new IllegalStateException(
-                s"Invalid type name, expected one of [null, boolean, object, array, number, integer, string], but got $other")
-          }
-        case Some(JsArray(valueTypes)) =>
-          val mandatory = requiredFields.contains(name)
-          val variants: Seq[Schema] = valueTypes.distinct.map {
-            case JsString(valueType) =>
-              valueType match {
-                case "object" =>
-                  ObjectSchema(name, path, common, description, mandatory, Seq.empty, Seq.empty)
-                case "string" =>
-                  StringSchema(name, path, common, description, mandatory)
-                case "number"  => NumberSchema(name, path, common, description, mandatory)
-                case "integer" => IntegerSchema(name, path, common, description, mandatory)
-                case "boolean" => BooleanSchema(name, path, common, desc, mandatory = true)
-                case "array"   => throw new IllegalStateException(s"Unspecified 'array' type not supported yet!")
-                case "null"    => NullSchema(name, path, common, desc)
-                case other =>
-                  throw new IllegalStateException(
-                    s"Invalid type name, expected one of [null, boolean, object, array, number, integer, string], but got $other")
-              }
-            case other =>
-              throw new IllegalStateException(s"Invalid type definition, expected an array of strings, but got $other")
+    val definitions: Seq[Schema] = readDefinitions("definitions", name, path, json, description, referenceResolver) ++
+      readDefinitions("$defs", name, path, json, description, referenceResolver)
 
-          }
-          if (variants.isEmpty) throw new IllegalStateException(s"")
-          else if (variants.size == 1) variants.head
-          else OneOfSchema(name, path, common, description, mandatory, variants, Seq.empty)
+    val common = SchemaCommon(definitions)
 
-        case Some(other) =>
-          throw new IllegalStateException(
-            s"Invalid type definition, expected a string or an array of strings but got $other")
+    /*
+     * 6.1. Validation Keywords for Any Instance Type
+     * 6.1.1. type
+     * The value of this keyword MUST be either a string or an array. If it is an array, elements of the array MUST be strings and MUST be unique.
+     *
+     * String values MUST be one of the six primitive types ("null", "boolean", "object", "array", "number", or "string"),
+     * or "integer" which matches any number with a zero fractional part.
+     *
+     * An instance validates if and only if the instance is in any of the sets listed for this keyword.
+     */
+    (json \ "type").asOpt[JsValue] match {
+      case Some(JsString(valueType)) =>
+        valueType match {
+          case "object" =>
+            readObjectSchema(name, path, common, json, desc, isMandatory, referenceResolver)
+          case "string"  => readStringSchema(name, path, common, json, desc, isMandatory)
+          case "number"  => readNumberSchema(name, path, common, json, desc, isMandatory)
+          case "integer" => readIntegerSchema(name, path, common, json, desc, isMandatory)
+          case "boolean" => BooleanSchema(name, path, common, desc, mandatory = true)
+          case "array" =>
+            readArraySchema(name, path, common, json, desc, isMandatory, referenceResolver)
+          case "null" =>
+            readObjectSchema(name, path, common, json, desc, isMandatory, referenceResolver)
+          case other =>
+            throw new IllegalStateException(
+              s"Invalid type name, expected one of [null, boolean, object, array, number, integer, string], but got $other")
+        }
+      case Some(JsArray(valueTypes)) =>
+        val mandatory = requiredFields.contains(name)
+        val variants: Seq[Schema] = valueTypes.distinct.map {
+          case JsString(valueType) =>
+            valueType match {
+              case "object" =>
+                ObjectSchema(name, path, common, description, mandatory, Seq.empty, Seq.empty)
+              case "string" =>
+                StringSchema(name, path, common, description, mandatory)
+              case "number"  => NumberSchema(name, path, common, description, mandatory)
+              case "integer" => IntegerSchema(name, path, common, description, mandatory)
+              case "boolean" => BooleanSchema(name, path, common, desc, mandatory = true)
+              case "array"   => throw new IllegalStateException(s"Unspecified 'array' type not supported yet!")
+              case "null"    => NullSchema(name, path, common, desc)
+              case other =>
+                throw new IllegalStateException(
+                  s"Invalid type name, expected one of [null, boolean, object, array, number, integer, string], but got $other")
+            }
+          case other =>
+            throw new IllegalStateException(s"Invalid type definition, expected an array of strings, but got $other")
 
-        case None =>
-          (json \ "$ref").asOpt[String] match {
-            case Some(reference) =>
-              val path2 = reference.split("/").reverse.toList
-              referenceResolver
-                .lookup(reference, readSchema(_, path2, _, description = desc, requiredFields, referenceResolver)) match {
-                case Some(referencedSchema) =>
-                  if (reference.startsWith("#/")) {
-                    if (referencedSchema.isPrimitive) Schema.copy(referencedSchema, name, "$ref" :: path, description)
-                    else
-                      InternalReference(
-                        name,
-                        "$ref" :: path,
-                        common,
-                        description,
-                        reference,
-                        referencedSchema,
-                        requiredFields)
-                  } else
-                    ExternalReference(
-                      name,
-                      "$ref" :: path,
-                      common,
-                      description,
-                      reference,
-                      referencedSchema,
-                      requiredFields)
+        }
+        if (variants.isEmpty) throw new IllegalStateException(s"")
+        else if (variants.size == 1) variants.head
+        else OneOfSchema(name, path, common, description, mandatory, variants, Seq.empty)
 
-                case None =>
-                  throw new IllegalStateException(s"Invalid schema reference $reference")
-              }
-            case None =>
-              (json \ "oneOf").asOpt[JsArray] match {
-                case Some(array) =>
-                  readOneOfSchema(
-                    name,
-                    "oneOf" :: path,
-                    common,
-                    array,
-                    description,
-                    isMandatory,
-                    requiredFields,
-                    Seq.empty,
-                    referenceResolver)
-                case None =>
-                  (json \ "const").asOpt[JsValue] match {
-                    case Some(const) =>
-                      const match {
-                        case JsString(value) =>
-                          StringSchema(
-                            name,
-                            "const" :: path,
-                            common,
-                            description,
-                            requiredFields.contains(name),
-                            enum = Some(Seq(value)))
-                        case other =>
-                          throw new IllegalStateException(
-                            s"Unsupported const definition, expected string value, but got $other.")
-                      }
-                    case None =>
-                      (json \ "properties").asOpt[JsValue] match {
-                        case Some(_) =>
-                          // fallback to assume it is object schema if properties present
-                          readObjectSchema(name, path, common, json, desc, isMandatory, referenceResolver)
-                        case None =>
-                          // fallback to assume it is object schema with indirect properties
-                          readObjectSchema(
-                            name,
-                            path,
-                            common,
-                            JsObject(Seq("properties" -> json)),
-                            desc,
-                            isMandatory,
-                            referenceResolver)
-                      }
-                  }
-              }
-          }
-      }
+      case Some(other) =>
+        throw new IllegalStateException(
+          s"Invalid type definition, expected a string or an array of strings but got $other")
+
+      case None =>
+        (json \ "$ref").asOpt[String] match {
+          case Some(reference) =>
+            val path3 = reference.split("/").reverse.toList
+            val path2 = referenceResolver.parse(reference)
+            referenceResolver
+              .lookup(reference, readSchema(_, path2, _, description = desc, requiredFields, referenceResolver)) match {
+              case Some(referencedSchema) =>
+                if (reference.startsWith("#/")) {
+                  if (referencedSchema.isPrimitive) Schema.copy(referencedSchema, name, "$ref" :: path, description)
+                  else
+                    InternalSchemaReference(
+                      name = name,
+                      path = "$ref" :: path,
+                      common = common,
+                      description = description,
+                      reference = reference,
+                      schema = referencedSchema,
+                      required = requiredFields)
+                } else
+                  ExternalSchemaReference(
+                    name = name,
+                    path = "$ref" :: path,
+                    common = common,
+                    description = description,
+                    reference = reference,
+                    schema = referencedSchema,
+                    required = requiredFields)
+
+              case None =>
+                throw new IllegalStateException(s"Invalid schema reference $reference")
+            }
+          case None =>
+            (json \ "oneOf").asOpt[JsArray] match {
+              case Some(array) =>
+                readOneOfSchema(
+                  name,
+                  "oneOf" :: path,
+                  common,
+                  array,
+                  description,
+                  isMandatory,
+                  requiredFields,
+                  Seq.empty,
+                  referenceResolver)
+              case None =>
+                (json \ "const").asOpt[JsValue] match {
+                  case Some(const) =>
+                    const match {
+                      case JsString(value) =>
+                        StringSchema(
+                          name = name,
+                          path = "const" :: path,
+                          common = common,
+                          description = description,
+                          mandatory = requiredFields.contains(name),
+                          enum = Some(Seq(value)))
+                      case other =>
+                        throw new IllegalStateException(
+                          s"Unsupported const definition, expected string value, but got $other.")
+                    }
+                  case None =>
+                    (json \ "properties").asOpt[JsValue] match {
+                      case Some(_) =>
+                        // fallback to assume it is object schema if properties present
+                        readObjectSchema(name, path, common, json, desc, isMandatory, referenceResolver)
+                      case None =>
+                        // fallback to assume it is object schema with indirect properties
+                        readObjectSchema(
+                          name,
+                          path,
+                          common,
+                          JsObject(Seq("properties" -> json)),
+                          desc,
+                          isMandatory,
+                          referenceResolver)
+                    }
+                }
+            }
+        }
     }
   }
 
@@ -392,9 +400,9 @@ object Schema {
     val customGenerator = (json \ "x_gen").asOpt[String]
 
     StringSchema(
-      name,
-      path,
-      common,
+      name = name,
+      path = path,
+      common = common,
       description = description,
       mandatory = isMandatory,
       pattern = pattern,
@@ -421,12 +429,12 @@ object Schema {
     val customGenerator = (json \ "x_gen").asOpt[String]
 
     NumberSchema(
-      name,
-      path,
-      common,
+      name = name,
+      path = path,
+      common = common,
       description = description,
-      customGenerator = customGenerator,
       mandatory = isMandatory,
+      customGenerator = customGenerator,
       minimum = minimum,
       maximum = maximum,
       multipleOf = multipleOf
@@ -447,12 +455,12 @@ object Schema {
     val customGenerator = (json \ "x_gen").asOpt[String]
 
     IntegerSchema(
-      name,
-      path,
-      common,
+      name = name,
+      path = path,
+      common = common,
       description = description,
-      customGenerator = customGenerator,
       mandatory = isMandatory,
+      customGenerator = customGenerator,
       minimum = minimum,
       maximum = maximum,
       multipleOf = multipleOf
@@ -470,7 +478,7 @@ object Schema {
 
     val (required, alternatives) = readRequiredProperty(json)
 
-    val properties: Option[Seq[Schema]] = (json \ "properties")
+    val propertiesOpt: Option[Seq[Schema]] = (json \ "properties")
       .asOpt[JsObject]
       .map(
         properties =>
@@ -482,17 +490,17 @@ object Schema {
                 case fieldProperty: JsObject =>
                   readSchema(
                     name = name,
-                    path = name :: "properties" :: path,
+                    currentPath = name :: "properties" :: path,
                     json = fieldProperty,
                     requiredFields = required,
-                    referenceResolver = referenceResolver)
+                    currentReferenceResolver = referenceResolver)
                 case other =>
                   throw new IllegalArgumentException(s"Invalid object schema, expected ${path.reverse
                     .mkString("/")}/$name to be an object, but got ${other.getClass.getSimpleName}")
               }
             }))
 
-    val patternProperties: Option[Seq[Schema]] = (json \ "patternProperties")
+    val patternPropertiesOpt: Option[Seq[Schema]] = (json \ "patternProperties")
       .asOpt[JsObject]
       .map(
         patternProperties =>
@@ -505,10 +513,10 @@ object Schema {
                   case fieldProperty: JsObject =>
                     readSchema(
                       name = pattern,
-                      path = pattern :: "patternProperties" :: path,
+                      currentPath = pattern :: "patternProperties" :: path,
                       json = fieldProperty,
                       requiredFields = required,
-                      referenceResolver = referenceResolver)
+                      currentReferenceResolver = referenceResolver)
                   case other =>
                     throw new IllegalArgumentException(s"Invalid object schema, expected ${path.reverse
                       .mkString("/")}/$pattern to be an object, but got ${other.getClass.getSimpleName}")
@@ -516,62 +524,64 @@ object Schema {
               }
           })
 
-    val additionalProperties: Option[Seq[Schema]] = (json \ "additionalProperties")
+    val additionalPropertiesOpt: Option[Seq[Schema]] = (json \ "additionalProperties")
       .asOpt[JsValue] match {
       case Some(property: JsObject) =>
         val definition = readSchema(
           name = name,
-          path = "additionalProperties" :: path,
+          currentPath = "additionalProperties" :: path,
           json = property,
           requiredFields = required,
-          referenceResolver = referenceResolver)
+          currentReferenceResolver = referenceResolver)
         definition match {
           case o: ObjectSchema => Some(o.properties)
-          case m: MapSchema    => Some(m.properties)
+          case m: MapSchema    => Some(m.patternProperties)
           case other           => Some(Seq(other))
         }
 
       case _ => None
     }
 
-    (properties, patternProperties, additionalProperties) match {
-      case (Some(props), pp, ap) =>
+    (propertiesOpt, patternPropertiesOpt, additionalPropertiesOpt) match {
+      case (Some(properties), _, _) =>
         ObjectSchema(
-          name,
-          path,
-          common,
+          name = name,
+          path = path,
+          common = common,
           description = description,
           mandatory = isMandatory,
-          properties = props ++ ap.getOrElse(Seq.empty),
+          properties = properties ++ additionalPropertiesOpt.getOrElse(Seq.empty),
           required = required,
           alternatives = alternatives,
-          patternProperties = pp
+          patternProperties = patternPropertiesOpt
         )
 
-      case (None, pp, Some(props)) =>
+      case (None, _, Some(additionalProperties)) =>
         ObjectSchema(
-          name,
-          path,
-          common,
+          name = name,
+          path = path,
+          common = common,
           description = description,
           mandatory = isMandatory,
-          properties = props,
+          properties = additionalProperties,
           required = required,
           alternatives = alternatives,
-          patternProperties = pp)
+          patternProperties = patternPropertiesOpt
+        )
 
-      case (None, Some(props), None) =>
+      case (None, Some(patternProperties), None) =>
         MapSchema(
-          name,
-          path,
-          common,
+          name = name,
+          path = path,
+          common = common,
           description = description,
           mandatory = isMandatory,
-          properties = props,
+          patternProperties = patternProperties,
           requiredFields = required,
-          alternatives = alternatives)
+          alternatives = alternatives
+        )
 
-      case (None, None, ap) =>
+      case (None, None, _) =>
         (json \ "oneOf").asOpt[JsArray] match {
           case Some(array) =>
             readOneOfSchema(
@@ -586,12 +596,12 @@ object Schema {
               referenceResolver)
           case None =>
             ObjectSchema(
-              name,
-              path,
-              common,
+              name = name,
+              path = path,
+              common = common,
               description = description,
               mandatory = isMandatory,
-              properties = ap.getOrElse(Seq.empty),
+              properties = additionalPropertiesOpt.getOrElse(Seq.empty),
               required = required,
               alternatives = alternatives,
               patternProperties = None
@@ -612,19 +622,22 @@ object Schema {
     val items = (json \ "items").as[JsObject]
     val minItems = (json \ "minItems").asOpt[Int]
     val maxItems = (json \ "maxItems").asOpt[Int]
-    val itemName =
-      if (name.endsWith("Array")) name.substring(0, name.length - 5)
-      else if (name.endsWith("List")) name.substring(0, name.length - 4)
-      else name
+
     val itemDefinition =
-      readSchema(itemName, "items" :: path, items, requiredFields = Seq(name), referenceResolver = referenceResolver)
+      readSchema(
+        NameUtils.singular(name),
+        "items" :: path,
+        items,
+        requiredFields = Seq(name),
+        currentReferenceResolver = referenceResolver)
+
     ArraySchema(
-      name,
-      path,
-      common,
+      name = name,
+      path = path,
+      common = common,
       description = description,
       mandatory = isMandatory,
-      itemDefinition,
+      item = itemDefinition,
       minItems = minItems,
       maxItems = maxItems)
   }
@@ -641,7 +654,12 @@ object Schema {
     referenceResolver: SchemaReferenceResolver): OneOfSchema = {
     val props = array.value.zipWithIndex.map {
       case (jsObject: JsObject, i) =>
-        readSchema(name, i.toString :: path, jsObject, requiredFields = required, referenceResolver = referenceResolver)
+        readSchema(
+          name,
+          i.toString :: path,
+          jsObject,
+          requiredFields = required,
+          currentReferenceResolver = referenceResolver)
       case (other, i) =>
         throw new IllegalArgumentException(
           s"Invalid oneOf schema, expected ${path.reverse.mkString("/")}[$i] to be an object, but got ${other.getClass.getSimpleName}")
@@ -664,10 +682,10 @@ object Schema {
             .map(_._1)
             .distinct
             .map(name => {
-              val path2 = name :: propertyName :: path
-              val reference = path2.reverse.mkString("/")
+              val uri = toUri(name :: propertyName :: path)
+              val path2 = referenceResolver.parse(uri)
               referenceResolver
-                .lookup(reference, readSchema(_, path2, _, description, Seq.empty, referenceResolver))
+                .lookup(uri, readSchema(_, path2, _, description, Seq.empty, referenceResolver))
             })
             .collect { case Some(x) => x }
       )
@@ -708,7 +726,14 @@ object Schema {
       s.copy(name = name, path = path, description = description.orElse(schema.description))
     case s: NullSchema =>
       s.copy(name = name, path = path, description = description.orElse(schema.description))
-    case s: EmptySchema =>
-      s.copy(name = name, path = path)
+    case s: InternalSchemaReference =>
+      s.copy(name = name, path = path, description = description.orElse(schema.description))
+    case s: ExternalSchemaReference =>
+      s.copy(name = name, path = path, description = description.orElse(schema.description))
+  }
+
+  def toUri(path: List[String]): String = path.reverse.filterNot(_.isEmpty) match {
+    case Nil     => ""
+    case x :: xs => (if (x == "#") "#/" else x) + xs.mkString("/")
   }
 }

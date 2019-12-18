@@ -17,12 +17,12 @@
 package uk.gov.hmrc.jsonschema2scala
 
 trait Code {
-  def append(b: Sink): Unit
+  def append(b: CodeSink): Unit
 }
 
 object Code {
   def toString(code: Seq[Code]): String = {
-    val b = new StringBuilderSink
+    val b = new StringBuilderCodeSink
     code.foreach(c => {
       c.append(b)
       b.newline
@@ -31,18 +31,18 @@ object Code {
   }
 }
 
-trait Sink {
+trait CodeSink {
   protected var indentSize = 0
   protected val indent = "  "
 
-  def append(s: String): Sink
-  def newline: Sink = append("\n").append(indent * indentSize)
-  def indentInc: Sink = { indentSize = indentSize + 1; this }
-  def indentDec: Sink = { indentSize = Math.max(0, indentSize - 1); this }
+  def append(s: String): CodeSink
+  def newline: CodeSink = append("\n").append(indent * indentSize)
+  def indentInc: CodeSink = { indentSize = indentSize + 1; this }
+  def indentDec: CodeSink = { indentSize = Math.max(0, indentSize - 1); this }
 }
 
-class StringBuilderSink extends Sink {
+class StringBuilderCodeSink extends CodeSink {
   val sb = new StringBuilder
-  override def append(s: String): Sink = { sb.append(s); this }
+  override def append(s: String): CodeSink = { sb.append(s); this }
   override def toString: String = sb.toString()
 }

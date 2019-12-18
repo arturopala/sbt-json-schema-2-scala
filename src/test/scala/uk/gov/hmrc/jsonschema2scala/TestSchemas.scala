@@ -30,6 +30,6 @@ trait TestSchemas {
     }
     .collect { case Some(x) => x }
 
-  val testReferences: Map[String, SchemaSource] = testSchemas.map(s => (s.id.getOrElse("unknown"), s)).toMap
+  val testReferences: Map[String, SchemaSource] = testSchemas.map(s => (s.uri.toString, s)).toMap
 
 }

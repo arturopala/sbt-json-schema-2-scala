@@ -1,6 +1,7 @@
 package uk.gov.hmrc.jsonschema2scala.schema
 
 import java.io.{File, InputStream}
+import java.net.URI
 
 import play.api.libs.json.{JsObject, Json}
 
@@ -10,9 +11,15 @@ import scala.util.{Failure, Success, Try}
 sealed trait SchemaSource {
 
   def name: String
-  def content: JsObject
+  def json: JsObject
 
-  lazy val id: Option[String] = (content \ "$id").asOpt[String]
+  lazy val uri: URI = (json \ "$id")
+    .asOpt[String]
+    .flatMap(s => Try(URI.create(s)).toOption)
+    .map(_.normalize())
+    .getOrElse(defaultURI)
+
+  def defaultURI: URI
 }
 
 case class SchemaFile(file: File) extends SchemaSource {
@@ -27,7 +34,7 @@ case class SchemaFile(file: File) extends SchemaSource {
       .mkString
   }
 
-  val content: JsObject = {
+  val json: JsObject = {
     val source: Source = Source.fromFile(file, "utf-8")
     val json = Try(Json.parse(source.mkString).as[JsObject])
     source.close()
@@ -36,11 +43,13 @@ case class SchemaFile(file: File) extends SchemaSource {
       case Failure(exception) => throw exception
     }
   }
+
+  override def defaultURI: URI = URI.create(s"schema://$name")
 }
 
 case class SchemaResource(inputStream: InputStream, name: String) extends SchemaSource {
 
-  val content: JsObject = {
+  val json: JsObject = {
     val source: Source = Source.fromInputStream(inputStream, "utf-8")
     val json = Try(Json.parse(source.mkString).as[JsObject])
     Try(source.close())
@@ -49,5 +58,7 @@ case class SchemaResource(inputStream: InputStream, name: String) extends Schema
       case Failure(exception) => throw exception
     }
   }
+
+  override def defaultURI: URI = URI.create(s"schema://$name")
 
 }

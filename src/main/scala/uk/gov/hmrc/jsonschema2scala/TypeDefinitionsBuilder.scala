@@ -28,7 +28,7 @@ object TypeDefinitionsBuilder {
       }
       .distinct
 
-    if (types.isEmpty) Left(s"Schema ${schema.url} is not valid for type definition" :: Nil)
+    if (types.isEmpty) Left(s"Schema ${schema.uri} is not valid for type definition" :: Nil)
     else if (types.size == 1) Right(types.head)
     else {
       types.find(_.name == schema.name) match {
@@ -70,11 +70,11 @@ object TypeDefinitionsBuilder {
   def processSchemaReferences(name: String, path: List[String], schema: Schema)(
     implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] = schema match {
 
-    case internalReference: InternalReference =>
+    case internalReference: InternalSchemaReference =>
       processSchema(typeNameProvider.toTypeName(internalReference.schema), Nil, internalReference.schema)
         .map(_.copy(forReferenceOnly = true))
 
-    case externalReference: ExternalReference =>
+    case externalReference: ExternalSchemaReference =>
       processSchema(typeNameProvider.toTypeName(externalReference.schema), Nil, externalReference.schema)
         .map(_.copy(forReferenceOnly = true))
 
@@ -111,7 +111,7 @@ object TypeDefinitionsBuilder {
   def processOneOfSchema(name: String, path: List[String], oneOfSchema: OneOfSchema)(
     implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] = {
 
-    val templateNames: Set[String] = oneOfSchema.common.definitions.map(typeNameProvider.toTypeName).toSet
+    val templateNames: Set[String] = listTemplateNames(oneOfSchema, typeNameProvider)
 
     val eligible: Seq[Schema] = oneOfSchema.variants.filterNot(_.isPrimitive)
 
@@ -145,11 +145,11 @@ object TypeDefinitionsBuilder {
               val subtypeNameVariant =
                 if (typeNameProvider.toTypeName(schema) == oneOfTypeName) {
                   pos = pos + 1
-                  s"${typeNameProvider.toTypeName(schema)}_$pos"
+                  typeNameProvider.toTypeNameVariant(schema, pos)
                 } else if (sameNameCounters.contains(subtypeName)) {
                   val counter = sameNameCounters(subtypeName)
                   val pos = counter.increment
-                  s"${typeNameProvider.toTypeName(schema)}_$pos"
+                  typeNameProvider.toTypeNameVariant(schema, pos)
                 } else typeNameProvider.toTypeName(schema)
 
               processSchema(subtypeNameVariant, name :: path, schema) ++ processSchemaReferences(
@@ -161,7 +161,7 @@ object TypeDefinitionsBuilder {
         // New interface type to span over multiple oneOf variants
         //val isRef = oneOf.isRef || subtypes.exists(_.schema.isRef)
         val superType = TypeDefinition(
-          name,
+          oneOfTypeName,
           path,
           ObjectSchema(
             name = name,
@@ -192,32 +192,28 @@ object TypeDefinitionsBuilder {
   def processMapSchema(name: String, path: List[String], mapSchema: MapSchema)(
     implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] = {
 
-    val templateNames: Set[String] = mapSchema.common.definitions.map(typeNameProvider.toTypeName).toSet
-    val eligible = mapSchema.properties.filterNot(_.isPrimitive)
+    val eligible = mapSchema.patternProperties.filterNot(_.isPrimitive)
 
     val typeDefinitions = eligible
       .flatMap { schema =>
-        val childTypeName = {
-          val n = typeNameProvider.toTypeName(schema)
-          if (templateNames.contains(n)) s"${name}_$n" else n
-        }
+        val childTypeName = typeNameProvider.toTypePatternName(schema)
         processSchema(childTypeName, name :: path, schema)
       }
 
     sortByName(typeDefinitions)
   }
 
-  def listTemplateNames(objectSchema: ObjectSchema, typeNameProvider: TypeNameProvider): Set[String] =
-    objectSchema.common.definitions.map(typeNameProvider.toTypeName).toSet
+  def listTemplateNames(schema: Schema, typeNameProvider: TypeNameProvider): Set[String] =
+    schema.common.definitions.map(typeNameProvider.toTypeName).toSet
 
   def calculateExternalImports(schema: ObjectSchema)(implicit typeNameProvider: TypeNameProvider): Set[String] =
     schema.properties.flatMap {
       case o: ObjectSchema => calculateExternalImports(o)
       case oneOf: OneOfSchema if oneOf.variants.collect { case _: ObjectSchema => }.nonEmpty =>
         oneOf.variants.collect { case o: ObjectSchema => o }.flatMap(calculateExternalImports)
-      case a: ArraySchema if a.item.isInstanceOf[ExternalReference] =>
+      case a: ArraySchema if a.item.isInstanceOf[ExternalSchemaReference] =>
         Set(typeNameProvider.toTypeName(a.item.asInstanceOf[ObjectSchema]))
-      case e: ExternalReference if !e.isPrimitive =>
+      case e: ExternalSchemaReference if !e.isPrimitive =>
         Set(typeNameProvider.toTypeName(e))
       case _ => Set()
     }.toSet

@@ -38,13 +38,13 @@ import uk.gov.hmrc.jsonschema2scala.schema.SchemaSource
 class ScalaCodeRendererMoreSpec
     extends WordSpec with Matchers with CodeRenderingAssertions with TestSchemas with BeforeAndAfterAll {
 
-  implicit val compiler = Compiler()
+  implicit val compiler: Compiler = Compiler()
 
   override def afterAll(): Unit =
     compiler.cleanup()
 
   "JsonSchema2ScalaCodeRenderer" should {
-    testSchemas.foreach { schema: SchemaSource =>
+    testSchemas /*.filter(_.name.matches("Entity15"))*/.foreach { schema: SchemaSource =>
       s"render ${schema.name} schema" in assertCanParseAndCompile(schema, testReferences)
     }
   }

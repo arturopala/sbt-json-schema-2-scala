@@ -1,25 +1,31 @@
 package uk.gov.hmrc.jsonschema2scala
 
-import uk.gov.hmrc.jsonschema2scala.Names.{firstCharUppercase, normalize}
-import uk.gov.hmrc.jsonschema2scala.schema.{ExternalReference, InternalReference, Schema}
+import uk.gov.hmrc.jsonschema2scala.NameUtils.{firstCharUppercase, normalize}
+import uk.gov.hmrc.jsonschema2scala.schema.{ExternalSchemaReference, InternalSchemaReference, Schema}
 
 object ScalaTypeNameProvider extends TypeNameProvider {
 
   def toTypeName(schema: Schema): String = {
     val schemaName = schema match {
-      case i: InternalReference =>
+      case i: InternalSchemaReference =>
         i.schema.name
-      case e: ExternalReference =>
+      case e: ExternalSchemaReference =>
         e.schema.name
       case s => s.name
     }
     firstCharUppercase(normalize(schemaName))
   }
 
-  def safe(name: String): String =
+  override def safe(name: String): String =
     if (name.exists(noNameChars.contains) || scalaKeywords.contains(name)) s"`$name`" else name
 
-  val scalaKeywords: Set[String] = Set(
+  override def toTypeNameVariant(schema: Schema, pos: Int): String =
+    s"${toTypeName(schema)}_$pos"
+
+  override def toTypePatternName(schema: Schema): String =
+    "Pattern_" + SHA256.hashOf(schema.name, numberOfBytes = 4)
+
+  final val scalaKeywords: Set[String] = Set(
     "abstract",
     "case",
     "catch",
@@ -61,5 +67,5 @@ object ScalaTypeNameProvider extends TypeNameProvider {
     "yield"
   )
 
-  val noNameChars: Set[Char] = Set('@', '$', '-', '/', '.')
+  final val noNameChars: Set[Char] = Set('@', '$', '-', '/', '.')
 }

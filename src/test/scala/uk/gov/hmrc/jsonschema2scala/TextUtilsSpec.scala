@@ -33,22 +33,23 @@ package uk.gov.hmrc.jsonschema2scala
  */
 
 import org.scalatest.{Matchers, WordSpec}
-import uk.gov.hmrc.jsonschema2scala.ScalaCode.BlockComment
+import uk.gov.hmrc.jsonschema2scala.TextUtils.splitAndNormalize
 
-class BlockCommentSpec extends WordSpec with Matchers with TestSchemas {
+class TextUtilsSpec extends WordSpec with Matchers with TestSchemas {
 
   val loremIpsum =
     "Lorem ipsum dolor sit amet, consectetur adipisci elit. Sed, do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum."
 
-  "BlockComment" should {
-    "split comments to fit around expected line length" in {
-      BlockComment.splitAndNormalize(loremIpsum, 15).drop(1).head shouldBe "Lorem ipsum dolor "
-      BlockComment.splitAndNormalize(loremIpsum, 20).drop(1).head shouldBe "Lorem ipsum dolor sit amet,"
-      BlockComment.splitAndNormalize(loremIpsum, 30).drop(1).head shouldBe "Lorem ipsum dolor sit amet,"
-      BlockComment
-        .splitAndNormalize(loremIpsum, 60)
+  "TextUtils" should {
+    "split text to fit around expected line length" in {
+      splitAndNormalize(loremIpsum, 15).drop(1).head shouldBe "Lorem ipsum dolor "
+      splitAndNormalize(loremIpsum, 20).drop(1).head shouldBe "Lorem ipsum dolor sit amet,"
+      splitAndNormalize(loremIpsum, 30).drop(1).head shouldBe "Lorem ipsum dolor sit amet,"
+      splitAndNormalize(loremIpsum, 60)
         .drop(1)
         .head shouldBe "Lorem ipsum dolor sit amet, consectetur adipisci elit."
+      splitAndNormalize("Lorem ipsum dolor sit amet, consectetur adipisci elit", 45).headOption shouldBe Some(
+        "Lorem ipsum dolor sit amet, consectetur adipisci elit")
     }
   }
 

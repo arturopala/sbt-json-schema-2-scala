@@ -16,9 +16,9 @@
 
 package uk.gov.hmrc.jsonschema2scala
 
-import uk.gov.hmrc.jsonschema2scala.Names._
+import uk.gov.hmrc.jsonschema2scala.NameUtils._
 import uk.gov.hmrc.jsonschema2scala.ScalaCode._
-import uk.gov.hmrc.jsonschema2scala.schema.{ArraySchema, BooleanSchema, ExternalReference, NumberSchema, ObjectSchema, OneOfSchema, Schema, StringSchema}
+import uk.gov.hmrc.jsonschema2scala.schema.{ArraySchema, BooleanSchema, ExternalSchemaReference, NumberSchema, ObjectSchema, OneOfSchema, Schema, StringSchema}
 
 object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with CodeRendererUtils {
 
@@ -28,22 +28,24 @@ object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with Cod
 
   override def render(schema: Schema, options: ScalaCodeRendererOptions, description: String): CodeRenderingResult = {
 
-    implicit val typeNameProvider: TypeNameProvider = ScalaTypeNameProvider
+    val typeNameProvider: TypeNameProvider = ScalaTypeNameProvider
 
     TypeDefinitionsBuilder
-      .buildFrom(schema)
+      .buildFrom(schema)(typeNameProvider)
       .fold(
         errors => Left(errors),
         typeDef => {
 
-          val schemaUrlToTypePath: Map[String, List[String]] = TypeDefinition.listSchemaUrlToTypePath(typeDef).toMap
+          val schemaUrlToTypePath: Map[String, List[String]] = TypeDefinition.listSchemaUriToTypePath(typeDef).toMap
           val schemaUrlToTypeInterfaces: Map[String, Seq[List[String]]] =
-            TypeDefinition.listSchemaUrlToTypeInterfaces(typeDef).groupBy(_._1).mapValues(_.flatMap(_._2))
+            TypeDefinition.listSchemaUriToTypeInterfaces(typeDef).groupBy(_._1).mapValues(_.flatMap(_._2))
 
-          implicit val typeResolver: TypeResolver =
-            new ScalaTypeResolver(schemaUrlToTypePath, schemaUrlToTypeInterfaces)
+          val typeResolver: TypeResolver =
+            new ScalaTypeResolver(schemaUrlToTypePath, schemaUrlToTypeInterfaces)(typeNameProvider)
 
-          render(typeDef, options, ScalaCodeRendererContext(schema, options), description)
+          render(typeDef, options, ScalaCodeRendererContext(schema, options), description)(
+            typeResolver,
+            typeNameProvider)
         }
       )
   }
@@ -169,11 +171,10 @@ object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with Cod
         Some(
           Trait(
             name = typeDef.name,
-            supertypes = Seq.empty,
             members = generateInterfaceMethods(findCommonFields(typeDef.subtypes, typeDef)),
             modifier = Some("sealed"),
             comment =
-              Some(s"${typeDef.schema.description.map(d => s"$d\n").getOrElse("")}Schema: ${typeDef.schema.url}")
+              Some(s"${typeDef.schema.description.map(d => s"$d\n").getOrElse("")}Schema: ${typeDef.schema.uri}")
           ))
       else {
         val parameters = classFields ++ (if (isTopLevel && context.renderGenerators)
@@ -188,9 +189,16 @@ object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with Cod
                 typeDef),
               members = if (context.renderBuilders) generateBuilderMethods(typeDef) else Seq.empty,
               comment =
-                Some(s"${typeDef.schema.description.map(d => s"$d\n").getOrElse("")}Schema: ${typeDef.schema.url}")
+                Some(s"${typeDef.schema.description.map(d => s"$d\n").getOrElse("")}Schema: ${typeDef.schema.uri}")
             ))
-        } else None
+        } else if (!isTopLevel)
+          Some(
+            Trait(
+              name = typeDef.name,
+              comment =
+                Some(s"${typeDef.schema.description.map(d => s"$d\n").getOrElse("")}Schema: ${typeDef.schema.uri}")
+            ))
+        else None
       }
 
     val objectCode: Option[ScalaCode] =
@@ -377,7 +385,7 @@ object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with Cod
                   .map(v => s"${generateValueGenerator(hostType, v, context)}.map(_.asInstanceOf[${typeResolver.typeOf(v, hostType, showDefaultValue = false)}])")
                   .mkString(",\n  ")})"
             }
-        case e: ExternalReference => s"${typeNameProvider.toTypeName(e)}.gen"
+        case e: ExternalSchemaReference => s"${typeNameProvider.toTypeName(e)}.gen"
       })
 
     val genWithConstraints = property match {
@@ -512,7 +520,7 @@ object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with Cod
           }
 
       case _: BooleanSchema => None
-      case _: ExternalReference =>
+      case _: ExternalSchemaReference =>
         if (property.mandatory || isMandatory)
           Some(s""" checkProperty($propertyExtractor, ${typeNameProvider.toTypeName(property)}.validate)""")
         else Some(s"""  checkIfSome($propertyExtractor, ${typeNameProvider.toTypeName(property)}.validate)""")

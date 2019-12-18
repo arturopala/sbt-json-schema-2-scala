@@ -40,7 +40,7 @@ class SchemaSpec extends WordSpec with Matchers with TestSchemas {
   "JsonSchema" should {
     testSchemas.foreach { schema =>
       s"read and parse ${schema.name} schema" in {
-        val json = schema.content
+        val json = schema.json
         val definition = Schema.read(schema.name, json, testReferences)
         definition.isPrimitive shouldBe false
       }
