@@ -28,13 +28,26 @@ object TypeDefinitionsBuilder {
       }
       .distinct
 
-    types match {
-      case Nil => Left(s"Schema ${schema.url} is not valid for type definition" :: Nil)
-      case head :: tail =>
-        tail match {
-          case Nil => Right(head)
-          case _   => Right(head.copy(nestedTypes = head.nestedTypes ++ tail))
-        }
+    if (types.isEmpty) Left(s"Schema ${schema.url} is not valid for type definition" :: Nil)
+    else if (types.size == 1) Right(types.head)
+    else {
+      types.find(_.name == schema.name) match {
+        case Some(typeDef) =>
+          Right(typeDef.copy(nestedTypes = typeDef.nestedTypes ++ types.filterNot(_ == typeDef)))
+
+        case None =>
+          Right(
+            TypeDefinition(
+              schema.name,
+              Nil,
+              ObjectSchema(
+                name = schema.name,
+                path = schema.path,
+                description = schema.description,
+                mandatory = schema.mandatory),
+              nestedTypes = types
+            ))
+      }
     }
   }
 
@@ -153,12 +166,8 @@ object TypeDefinitionsBuilder {
           ObjectSchema(
             name = name,
             path = oneOfSchema.path,
-            common = SchemaCommon(),
-            properties = Seq.empty,
-            required = Seq.empty,
-            mandatory = oneOfSchema.mandatory,
-            description = oneOfSchema.description
-          ),
+            description = oneOfSchema.description,
+            mandatory = oneOfSchema.mandatory),
           isInterface = true,
           subtypes = subtypes
         )

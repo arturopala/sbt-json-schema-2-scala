@@ -164,28 +164,36 @@ object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with Cod
         |  ${if (context.renderBuilders) generateBuilderMethods(typeDef) else ""}
         |}"""*/
 
-    val classCode =
+    val classCode: Option[ScalaCode] =
       if (typeDef.isInterface)
-        Trait(
-          name = typeDef.name,
-          supertypes = Seq.empty,
-          members = generateInterfaceMethods(findCommonFields(typeDef.subtypes, typeDef)),
-          modifier = Some("sealed"),
-          comment = Some(s"${typeDef.schema.description.map(d => s"$d\n").getOrElse("")}Schema: ${typeDef.schema.url}")
-        )
-      else
-        CaseClass(
-          name = typeDef.name,
-          parameters = classFields ++ (if (isTopLevel && context.renderGenerators)
-                                         Seq(Param("id", "Option[String] = None"))
-                                       else Seq.empty),
-          supertypes = (if (isTopLevel && context.renderGenerators) Seq("Record") else Seq.empty) ++ compileClassInterfaceList(
-            typeDef),
-          members = if (context.renderBuilders) generateBuilderMethods(typeDef) else Seq.empty,
-          comment = Some(s"${typeDef.schema.description.map(d => s"$d\n").getOrElse("")}Schema: ${typeDef.schema.url}")
-        )
+        Some(
+          Trait(
+            name = typeDef.name,
+            supertypes = Seq.empty,
+            members = generateInterfaceMethods(findCommonFields(typeDef.subtypes, typeDef)),
+            modifier = Some("sealed"),
+            comment =
+              Some(s"${typeDef.schema.description.map(d => s"$d\n").getOrElse("")}Schema: ${typeDef.schema.url}")
+          ))
+      else {
+        val parameters = classFields ++ (if (isTopLevel && context.renderGenerators)
+                                           Seq(Param("id", "Option[String] = None"))
+                                         else Seq.empty)
+        if (parameters.nonEmpty) {
+          Some(
+            CaseClass(
+              name = typeDef.name,
+              parameters = parameters,
+              supertypes = (if (isTopLevel && context.renderGenerators) Seq("Record") else Seq.empty) ++ compileClassInterfaceList(
+                typeDef),
+              members = if (context.renderBuilders) generateBuilderMethods(typeDef) else Seq.empty,
+              comment =
+                Some(s"${typeDef.schema.description.map(d => s"$d\n").getOrElse("")}Schema: ${typeDef.schema.url}")
+            ))
+        } else None
+      }
 
-    val objectCode =
+    val objectCode: Option[ScalaCode] =
       Object(
         name = typeDef.name,
         supertypes = if (context.renderGenerators) Seq(s"RecordUtils[${typeDef.name}]") else Seq.empty,
@@ -200,11 +208,7 @@ object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with Cod
           customObject).flatten.collect(defined)
       ).asOption
 
-    val objectImport =
-      if (isTopLevel) objectCode.map(_ => WildcardImport(s"${context.packageName}.${typeDef.name}"))
-      else None
-
-    Seq(objectImport, Some(classCode), objectCode)
+    Seq(classCode, objectCode)
   }
 
   def generateObjectMembers(typeDef: TypeDefinition, context: ScalaCodeRendererContext): Seq[Option[ScalaCode]] =

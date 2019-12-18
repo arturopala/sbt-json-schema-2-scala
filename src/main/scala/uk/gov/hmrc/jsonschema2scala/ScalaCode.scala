@@ -28,7 +28,6 @@ object ScalaCode {
     comment: Option[String] = None)
       extends ScalaCode {
     override def append(b: Sink): Unit = {
-      b.newline
       comment.foreach { c =>
         BlockComment.append(c, b, doc = true)
         b.newline
@@ -65,13 +64,13 @@ object ScalaCode {
         b.indentDec.newline
         b.append("}")
       }
+      b.newline
     }
   }
 
   case class Object(name: String, supertypes: Seq[String], members: Seq[ScalaCode]) extends ScalaCode {
 
     override def append(b: Sink): Unit = {
-      b.newline
       b.append("object ")
       b.append(name)
       b.append(" {")
@@ -82,6 +81,7 @@ object ScalaCode {
       })
       b.indentDec.newline
       b.append("}")
+      b.newline
     }
 
     def asOption: Option[Object] = if (members.isEmpty) None else Some(this)
@@ -95,7 +95,6 @@ object ScalaCode {
     comment: Option[String] = None)
       extends ScalaCode {
     override def append(b: Sink): Unit = {
-      b.newline
       comment.foreach { c =>
         BlockComment.append(c, b, doc = true)
         b.newline
@@ -124,6 +123,7 @@ object ScalaCode {
         b.indentDec.newline
         b.append("}")
       }
+      b.newline
     }
   }
 
@@ -188,7 +188,24 @@ object ScalaCode {
 
   object BlockComment {
     def append(comment: String, b: Sink, doc: Boolean): Unit = {
-      val lines = comment
+      val lines = splitAndNormalize(comment, 80)
+      if (lines.nonEmpty) {
+        lines.headOption.map(line => {
+          b.append(if (doc) "/** " else "/* ")
+          b.append(line)
+        })
+        lines.tail.foreach(line => {
+          b.newline
+          b.append(if (doc) "  * " else " * ")
+          b.append(line)
+        })
+        if (lines.length > 1) b.newline
+        b.append(if (doc) "  */" else " */")
+      }
+    }
+
+    def splitAndNormalize(comment: String, count: Int): List[String] =
+      comment
         .split('\n')
         .foldLeft(List.empty[String])(
           (acc, v) =>
@@ -200,17 +217,42 @@ object ScalaCode {
                 case _                         => v :: acc
             })
         .reverse
-      lines.headOption.map(line => {
-        b.append(if (doc) "/** " else "/* ")
-        b.append(line)
-      })
-      lines.tail.foreach(line => {
-        b.newline
-        b.append(if (doc) "  * " else " * ")
-        b.append(line)
-      })
-      if (lines.length > 1) b.newline
-      b.append(if (doc) "  */" else " */")
+        .flatMap(splitAround(_, count)) match {
+        case Nil     => Nil
+        case x :: xs => if (xs.isEmpty || x.trim.isEmpty) x :: xs else "" :: x :: xs
+      }
+
+    def splitAround(string: String, count: Int): List[String] =
+      if (string.length < count) List(string)
+      else {
+        val p = findSplitPosition(string, count)
+        if (p < 0) List(string)
+        else {
+          val slice = string.substring(0, p + 1)
+          val next = {
+            val s = string.substring(p + 1)
+            if ((slice.endsWith(",") || slice.endsWith(".")) && s.startsWith(" ")) s.substring(1) else s
+          }
+          slice :: splitAround(next, count)
+        }
+      }
+
+    def findSplitPosition(string: String, count: Int): Int = {
+      val positions = List(
+        (string.indexOf('.', Math.max(count - 10, 0)), 0.5, 0),
+        (string.indexOf('.', count), 0.5, 1),
+        (string.indexOf(',', Math.max(count - 10, 0)), 1.0, 4),
+        (string.indexOf(',', count), 1.0, 5),
+        (string.indexOf(' ', Math.max(count - 10, 0)), 2.0, 8),
+        (string.indexOf(' ', count), 2.0, 9)
+      ).filter(_._1 >= 0).map {
+        case (pos, weight, offset) =>
+          (pos, Math.abs(count - pos) * weight + offset)
+      }
+      positions match {
+        case Nil      => -1
+        case nonEmpty => nonEmpty.minBy(_._2)._1
+      }
     }
   }
 

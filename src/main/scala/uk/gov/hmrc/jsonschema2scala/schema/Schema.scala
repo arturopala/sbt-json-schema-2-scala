@@ -45,11 +45,11 @@ case class EmptySchema(name: String, path: List[String], common: SchemaCommon, m
 case class ObjectSchema(
   name: String,
   path: List[String],
-  common: SchemaCommon,
-  properties: Seq[Schema],
-  required: Seq[String],
-  mandatory: Boolean,
+  common: SchemaCommon = SchemaCommon(),
   description: Option[String] = None,
+  mandatory: Boolean = false,
+  properties: Seq[Schema] = Seq.empty,
+  required: Seq[String] = Seq.empty,
   alternatives: Seq[Set[String]] = Seq.empty,
   patternProperties: Option[Seq[Schema]] = None)
     extends Schema {
@@ -61,11 +61,11 @@ case class ObjectSchema(
 case class MapSchema(
   name: String,
   path: List[String],
-  common: SchemaCommon,
-  properties: Seq[Schema],
-  requiredFields: Seq[String],
-  mandatory: Boolean,
+  common: SchemaCommon = SchemaCommon(),
   description: Option[String] = None,
+  mandatory: Boolean = false,
+  properties: Seq[Schema] = Seq.empty,
+  requiredFields: Seq[String] = Seq.empty,
   alternatives: Seq[Set[String]] = Seq.empty)
     extends Schema {
   override val isPrimitive: Boolean = false
@@ -76,10 +76,10 @@ case class MapSchema(
 case class OneOfSchema(
   name: String,
   path: List[String],
-  common: SchemaCommon,
-  variants: Seq[Schema],
+  common: SchemaCommon = SchemaCommon(),
   description: Option[String] = None,
-  mandatory: Boolean,
+  mandatory: Boolean = false,
+  variants: Seq[Schema] = Seq.empty,
   alternatives: Seq[Set[String]] = Seq.empty)
     extends Schema {
   override def validate: Boolean = variants.nonEmpty
@@ -89,9 +89,9 @@ case class OneOfSchema(
 case class StringSchema(
   name: String,
   path: List[String],
-  common: SchemaCommon,
-  mandatory: Boolean,
+  common: SchemaCommon = SchemaCommon(),
   description: Option[String] = None,
+  mandatory: Boolean = false,
   pattern: Option[String] = None,
   enum: Option[Seq[String]] = None,
   minLength: Option[Int] = None,
@@ -107,9 +107,9 @@ case class StringSchema(
 case class NumberSchema(
   name: String,
   path: List[String],
-  common: SchemaCommon,
+  common: SchemaCommon = SchemaCommon(),
   description: Option[String] = None,
-  mandatory: Boolean,
+  mandatory: Boolean = false,
   customGenerator: Option[String] = None,
   minimum: Option[BigDecimal] = None,
   maximum: Option[BigDecimal] = None,
@@ -121,9 +121,9 @@ case class NumberSchema(
 case class IntegerSchema(
   name: String,
   path: List[String],
-  common: SchemaCommon,
+  common: SchemaCommon = SchemaCommon(),
   description: Option[String] = None,
-  mandatory: Boolean,
+  mandatory: Boolean = false,
   customGenerator: Option[String] = None,
   minimum: Option[Int] = None,
   maximum: Option[Int] = None,
@@ -153,9 +153,9 @@ case class ArraySchema(
   name: String,
   path: List[String],
   common: SchemaCommon,
-  item: Schema,
   description: Option[String] = None,
   mandatory: Boolean,
+  item: Schema,
   minItems: Option[Int] = None,
   maxItems: Option[Int] = None)
     extends Schema {
@@ -167,8 +167,8 @@ case class InternalReference(
   name: String,
   path: List[String],
   common: SchemaCommon,
-  reference: String,
   description: Option[String] = None,
+  reference: String,
   schema: Schema,
   required: Seq[String])
     extends Schema {
@@ -181,8 +181,8 @@ case class ExternalReference(
   name: String,
   path: List[String],
   common: SchemaCommon,
-  reference: String,
   description: Option[String] = None,
+  reference: String,
   schema: Schema,
   required: Seq[String])
     extends Schema {
@@ -268,9 +268,9 @@ object Schema {
             case JsString(valueType) =>
               valueType match {
                 case "object" =>
-                  ObjectSchema(name, path, common, Seq.empty, Seq.empty, mandatory, description)
+                  ObjectSchema(name, path, common, description, mandatory, Seq.empty, Seq.empty)
                 case "string" =>
-                  StringSchema(name, path, common, mandatory, description)
+                  StringSchema(name, path, common, description, mandatory)
                 case "number"  => NumberSchema(name, path, common, description, mandatory)
                 case "integer" => IntegerSchema(name, path, common, description, mandatory)
                 case "boolean" => BooleanSchema(name, path, common, desc, mandatory = true)
@@ -286,7 +286,7 @@ object Schema {
           }
           if (variants.isEmpty) throw new IllegalStateException(s"")
           else if (variants.size == 1) variants.head
-          else OneOfSchema(name, path, common, variants, description, mandatory, Seq.empty)
+          else OneOfSchema(name, path, common, description, mandatory, variants, Seq.empty)
 
         case Some(other) =>
           throw new IllegalStateException(
@@ -306,8 +306,8 @@ object Schema {
                         name,
                         "$ref" :: path,
                         common,
-                        reference,
                         description,
+                        reference,
                         referencedSchema,
                         requiredFields)
                   } else
@@ -315,8 +315,8 @@ object Schema {
                       name,
                       "$ref" :: path,
                       common,
-                      reference,
                       description,
+                      reference,
                       referencedSchema,
                       requiredFields)
 
@@ -345,8 +345,8 @@ object Schema {
                             name,
                             "const" :: path,
                             common,
-                            requiredFields.contains(name),
                             description,
+                            requiredFields.contains(name),
                             enum = Some(Seq(value)))
                         case other =>
                           throw new IllegalStateException(
@@ -395,8 +395,8 @@ object Schema {
       name,
       path,
       common,
-      mandatory = isMandatory,
       description = description,
+      mandatory = isMandatory,
       pattern = pattern,
       enum = enum,
       minLength = minLength,
@@ -540,10 +540,10 @@ object Schema {
           name,
           path,
           common,
+          description = description,
+          mandatory = isMandatory,
           properties = props ++ ap.getOrElse(Seq.empty),
           required = required,
-          mandatory = isMandatory,
-          description = description,
           alternatives = alternatives,
           patternProperties = pp
         )
@@ -553,23 +553,22 @@ object Schema {
           name,
           path,
           common,
+          description = description,
+          mandatory = isMandatory,
           properties = props,
           required = required,
-          mandatory = isMandatory,
-          description = description,
           alternatives = alternatives,
-          patternProperties = pp
-        )
+          patternProperties = pp)
 
       case (None, Some(props), None) =>
         MapSchema(
           name,
           path,
           common,
+          description = description,
+          mandatory = isMandatory,
           properties = props,
           requiredFields = required,
-          mandatory = isMandatory,
-          description = description,
           alternatives = alternatives)
 
       case (None, None, ap) =>
@@ -590,10 +589,10 @@ object Schema {
               name,
               path,
               common,
+              description = description,
+              mandatory = isMandatory,
               properties = ap.getOrElse(Seq.empty),
               required = required,
-              mandatory = isMandatory,
-              description = description,
               alternatives = alternatives,
               patternProperties = None
             )
@@ -623,9 +622,9 @@ object Schema {
       name,
       path,
       common,
-      itemDefinition,
       description = description,
       mandatory = isMandatory,
+      itemDefinition,
       minItems = minItems,
       maxItems = maxItems)
   }
@@ -647,7 +646,7 @@ object Schema {
         throw new IllegalArgumentException(
           s"Invalid oneOf schema, expected ${path.reverse.mkString("/")}[$i] to be an object, but got ${other.getClass.getSimpleName}")
     }
-    OneOfSchema(name, path, common, variants = props, description = description, isMandatory, alternatives)
+    OneOfSchema(name, path, common, description = description, isMandatory, variants = props, alternatives)
   }
 
   def readDefinitions(
