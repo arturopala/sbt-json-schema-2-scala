@@ -13,10 +13,8 @@ sealed trait SchemaSource {
   def name: String
   def json: JsObject
 
-  lazy val uri: URI = (json \ "$id")
-    .asOpt[String]
-    .flatMap(s => Try(URI.create(s)).toOption)
-    .map(_.normalize())
+  lazy val uri: URI = SchemaReader
+    .readId(json)
     .getOrElse(defaultURI)
 
   def defaultURI: URI

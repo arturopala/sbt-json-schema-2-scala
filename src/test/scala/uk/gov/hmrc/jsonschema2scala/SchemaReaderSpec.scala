@@ -33,15 +33,15 @@ package uk.gov.hmrc.jsonschema2scala
  */
 
 import org.scalatest.{Matchers, WordSpec}
-import uk.gov.hmrc.jsonschema2scala.schema.Schema
+import uk.gov.hmrc.jsonschema2scala.schema.SchemaReader
 
-class SchemaSpec extends WordSpec with Matchers with TestSchemas {
+class SchemaReaderSpec extends WordSpec with Matchers with TestSchemas {
 
-  "JsonSchema" should {
+  "SchemaReader" should {
     testSchemas.foreach { schema =>
-      s"read and parse ${schema.name} schema" in {
+      s"read ${schema.name} schema" in {
         val json = schema.json
-        val definition = Schema.read(schema.name, json, testReferences)
+        val definition = SchemaReader.read(schema.name, json, testReferences)
         definition.isPrimitive shouldBe false
       }
     }

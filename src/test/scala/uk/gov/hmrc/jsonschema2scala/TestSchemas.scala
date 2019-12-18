@@ -24,7 +24,7 @@ trait TestSchemas {
 
   val testSchemas: Seq[SchemaSource] = (1 to 20)
     .map { no =>
-      Try(classOf[SchemaSpec].getResourceAsStream(f"/schemas/E$no%02d.schema.json")).map {
+      Try(classOf[SchemaReaderSpec].getResourceAsStream(f"/schemas/E$no%02d.schema.json")).map {
         SchemaResource(_, f"Entity$no%02d")
       }.toOption
     }

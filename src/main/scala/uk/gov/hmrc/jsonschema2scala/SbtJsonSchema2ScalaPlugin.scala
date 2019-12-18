@@ -20,7 +20,7 @@ import java.io._
 
 import sbt.Keys._
 import sbt._
-import uk.gov.hmrc.jsonschema2scala.schema.{Schema, SchemaFile}
+import uk.gov.hmrc.jsonschema2scala.schema.{Schema, SchemaFile, SchemaReader}
 
 import scala.io.Source
 
@@ -99,7 +99,7 @@ object SbtJsonSchema2ScalaPlugin extends AutoPlugin {
       println(s"Processing ${jsonSchemaFiles.size} schemas(s) with options $options")
 
       val schemaSources: Seq[SchemaFile] = parseJsonSchemas(jsonSchemaFiles)
-      val schemas: Seq[(SchemaFile, Schema)] = schemaSources.zip(Schema.readMultiple(schemaSources))
+      val schemas: Seq[(SchemaFile, Schema)] = schemaSources.zip(SchemaReader.readMany(schemaSources))
 
       schemas.map {
         case (schemaFile, definition) =>

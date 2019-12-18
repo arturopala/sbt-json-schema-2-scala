@@ -17,6 +17,17 @@ trait SchemaReferenceResolver {
   def isInternal(reference: String): Boolean
 }
 
+object SchemaReferenceResolver {
+
+  def rootPath(uri: URI): List[String] = "#" :: uri.toString :: Nil
+
+  def pathToUri(path: List[String]): String = path.reverse.filterNot(_.isEmpty) match {
+    case Nil     => ""
+    case x :: xs => (if (x == "#") "#/" else x) + xs.mkString("/")
+  }
+
+}
+
 object CachingReferenceResolver {
 
   def apply(uri: URI, schema: JsObject, upstreamResolver: Option[SchemaReferenceResolver]): SchemaReferenceResolver =
