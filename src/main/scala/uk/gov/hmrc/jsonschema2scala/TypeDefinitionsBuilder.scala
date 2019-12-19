@@ -36,7 +36,7 @@ object TypeDefinitionsBuilder {
         case Some(typeDef) => {
           val embeddedTypes: Seq[TypeDefinition] = types
             .filterNot(_ == typeDef)
-            .map(TypeDefinition.modifyPath(prependIfMissing(typeDef.name)))
+            .map(TypeDefinition.modifyPath(prependNameIfMissing(typeDef.name)))
 
           Right(typeDef.copy(nestedTypes = typeDef.nestedTypes ++ embeddedTypes))
         }
@@ -239,7 +239,7 @@ object TypeDefinitionsBuilder {
     case _ :: xs => xs
   }
 
-  def prependIfMissing(name: String): List[String] => List[String] = { path =>
+  def prependNameIfMissing(name: String): List[String] => List[String] = { path =>
     path.reverse match {
       case Nil     => name :: Nil
       case x :: xs => if (x == name) path else (name :: x :: xs).reverse
@@ -247,7 +247,6 @@ object TypeDefinitionsBuilder {
   }
 
   case class Counter(initial: Int = 0) {
-    @volatile
     var v: Int = initial
     def increment: Int = {
       v = v + 1
