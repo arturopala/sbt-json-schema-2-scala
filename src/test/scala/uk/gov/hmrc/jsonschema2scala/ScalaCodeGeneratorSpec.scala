@@ -34,7 +34,7 @@ package uk.gov.hmrc.jsonschema2scala
 
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpec}
 
-class ScalaCodeRendererSpec
+class ScalaCodeGeneratorSpec
     extends WordSpec with Matchers with CodeRenderingAssertions with TestSchemas with BeforeAndAfterAll {
 
   implicit val compiler: Compiler = Compiler()

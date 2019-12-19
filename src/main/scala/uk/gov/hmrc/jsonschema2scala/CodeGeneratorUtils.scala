@@ -16,16 +16,10 @@
 
 package uk.gov.hmrc.jsonschema2scala
 
-sealed trait JsonSchema2ScalaFeature
+trait CodeGeneratorUtils {
 
-object JsonSchema2ScalaFeature {
-  case object Validator extends JsonSchema2ScalaFeature
-  case object Generator extends JsonSchema2ScalaFeature
-  case object Sanitizer extends JsonSchema2ScalaFeature
-  case object Builder extends JsonSchema2ScalaFeature
-  case object PlayJson extends JsonSchema2ScalaFeature
+  def quoted(s: String): String = "\"\"\"" + s + "\"\"\""
 
-  val ALL: Set[JsonSchema2ScalaFeature] = Set(Builder, PlayJson, Validator, Generator, Sanitizer)
+  def defined[A]: PartialFunction[Option[A], A] = { case Some(x) => x }
+
 }
-
-case class ScalaCodeRendererOptions(features: Set[JsonSchema2ScalaFeature], packageName: String)

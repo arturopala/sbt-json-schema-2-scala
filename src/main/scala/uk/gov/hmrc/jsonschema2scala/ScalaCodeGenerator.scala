@@ -20,13 +20,16 @@ import uk.gov.hmrc.jsonschema2scala.NameUtils._
 import uk.gov.hmrc.jsonschema2scala.ScalaCode._
 import uk.gov.hmrc.jsonschema2scala.schema.{ArraySchema, BooleanSchema, ExternalSchemaReference, NumberSchema, ObjectSchema, OneOfSchema, Schema, StringSchema}
 
-object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with CodeRendererUtils {
+object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators with CodeGeneratorUtils {
 
   val maxNumberOfArgs = 22
 
-  override type CodeRendererOptions = ScalaCodeRendererOptions
+  override type CodeGeneratorOptions = ScalaCodeGeneratorOptions
 
-  override def render(schema: Schema, options: ScalaCodeRendererOptions, description: String): CodeRenderingResult = {
+  override def generateCodeFrom(
+    schema: Schema,
+    options: ScalaCodeGeneratorOptions,
+    description: String): CodeGeneratorResult = {
 
     val typeNameProvider: TypeNameProvider = ScalaTypeNameProvider
 
@@ -43,20 +46,20 @@ object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with Cod
           val typeResolver: TypeResolver =
             new ScalaTypeResolver(schemaUrlToTypePath, schemaUrlToTypeInterfaces)(typeNameProvider)
 
-          render(typeDef, options, ScalaCodeRendererContext(schema, options), description)(
+          generateCodeFrom(typeDef, options, ScalaCodeGeneratorContext(schema, options), description)(
             typeResolver,
             typeNameProvider)
         }
       )
   }
 
-  def render(
+  def generateCodeFrom(
     typeDef: TypeDefinition,
-    options: ScalaCodeRendererOptions,
-    context: ScalaCodeRendererContext,
+    options: ScalaCodeGeneratorOptions,
+    context: ScalaCodeGeneratorContext,
     description: String)(
     implicit typeResolver: TypeResolver,
-    typeNameProvider: TypeNameProvider): CodeRenderingResult = {
+    typeNameProvider: TypeNameProvider): CodeGeneratorResult = {
 
     val code: Seq[Option[ScalaCode]] =
       Seq(
@@ -77,7 +80,7 @@ object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with Cod
     Right(code.collect(defined))
   }
 
-  def generateGlobalImports(context: ScalaCodeRendererContext): Seq[Option[ScalaCode]] =
+  def generateGlobalImports(context: ScalaCodeGeneratorContext): Seq[Option[ScalaCode]] =
     Seq(
       context.generatorsOpt.map(_ => Import("org.scalacheck", List("Arbitrary", "Gen"))),
       context.playJsonOpt.map(_ => WildcardImport("play.api.libs.json")))
@@ -93,7 +96,7 @@ object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with Cod
       .filterNot(_.forReferenceOnly)
       .flatMap(computeTypesTree(_, level + 1))
 
-  def generateTypeDefinition(typeDef: TypeDefinition, isTopLevel: Boolean, context: ScalaCodeRendererContext)(
+  def generateTypeDefinition(typeDef: TypeDefinition, isTopLevel: Boolean, context: ScalaCodeGeneratorContext)(
     implicit typeResolver: TypeResolver,
     typeNameProvider: TypeNameProvider): Seq[Option[ScalaCode]] = {
 
@@ -222,7 +225,7 @@ object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with Cod
     Seq(classCode, objectCode)
   }
 
-  def generateObjectMembers(typeDef: TypeDefinition, context: ScalaCodeRendererContext): Seq[Option[ScalaCode]] =
+  def generateObjectMembers(typeDef: TypeDefinition, context: ScalaCodeGeneratorContext): Seq[Option[ScalaCode]] =
     Seq(
       context.validatorsOpt.map(_ => WildcardImport("Validator")),
       context.generatorsOpt.map(_ => WildcardImport("Generator.GenOps")),
@@ -305,7 +308,7 @@ object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with Cod
       case s              => s.reduce[Set[(String, String)]]((a, b) => a.intersect(b))
     }
 
-  def generateFieldGenerators(typeDef: TypeDefinition, context: ScalaCodeRendererContext)(
+  def generateFieldGenerators(typeDef: TypeDefinition, context: ScalaCodeGeneratorContext)(
     implicit typeResolver: TypeResolver,
     typeNameProvider: TypeNameProvider): String =
     typeDef.schema.properties
@@ -347,7 +350,7 @@ object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with Cod
   def generateValueGenerator(
     hostType: TypeDefinition,
     property: Schema,
-    context: ScalaCodeRendererContext,
+    context: ScalaCodeGeneratorContext,
     wrapOption: Boolean = true)(implicit typeResolver: TypeResolver, typeNameProvider: TypeNameProvider): String = {
     val gen = knownFieldGenerators(property.name)
       .orElse(knownFieldGenerators(pathLastPart(property)))
@@ -403,7 +406,7 @@ object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with Cod
     if (!property.mandatory && wrapOption) s"""Generator.optionGen($genWithConstraints)""" else genWithConstraints
   }
 
-  def generatePropertyValidators(typeDef: TypeDefinition, context: ScalaCodeRendererContext)(
+  def generatePropertyValidators(typeDef: TypeDefinition, context: ScalaCodeGeneratorContext)(
     implicit typeResolver: TypeResolver,
     typeNameProvider: TypeNameProvider): Seq[Option[ScalaCode]] =
     if (!context.renderValidators) Seq.empty
@@ -422,7 +425,7 @@ object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with Cod
               ))
         }
 
-  def generateObjectValidator(typeDef: TypeDefinition, context: ScalaCodeRendererContext)(
+  def generateObjectValidator(typeDef: TypeDefinition, context: ScalaCodeGeneratorContext)(
     implicit typeNameProvider: TypeNameProvider): String = {
     val propertyValidatorsCalls = typeDef.schema.properties
       .take(maxNumberOfArgs)
@@ -447,7 +450,7 @@ object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with Cod
 
   def generateValueValidator(
     property: Schema,
-    context: ScalaCodeRendererContext,
+    context: ScalaCodeGeneratorContext,
     isMandatory: Boolean = false,
     extractProperty: Boolean = true)(
     implicit typeResolver: TypeResolver,
@@ -530,7 +533,7 @@ object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with Cod
     }
   }
 
-  def generateValueValidatorCall(property: Schema, context: ScalaCodeRendererContext, isMandatory: Boolean = false)(
+  def generateValueValidatorCall(property: Schema, context: ScalaCodeGeneratorContext, isMandatory: Boolean = false)(
     implicit typeNameProvider: TypeNameProvider): Option[String] =
     property match {
       case d: Schema if d.validate =>
@@ -554,7 +557,7 @@ object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with Cod
   def generateComposedFieldName(parts: Seq[String], sep: String): String =
     (parts.head +: parts.tail.map(p => p.take(1).toUpperCase + p.drop(1))).mkString(sep)
 
-  def generateSanitizers(typeDef: TypeDefinition, context: ScalaCodeRendererContext)(
+  def generateSanitizers(typeDef: TypeDefinition, context: ScalaCodeGeneratorContext)(
     implicit typeResolver: TypeResolver,
     typeNameProvider: TypeNameProvider): Seq[Option[ScalaCode]] = {
     val simpleSanitizers: Seq[Option[ScalaCode]] = typeDef.schema.properties
@@ -622,7 +625,7 @@ object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with Cod
     else simpleSanitizers ++ generateAlternativeSanitizers(typeDef, context)
   }
 
-  def generateAlternativeSanitizers(typeDef: TypeDefinition, context: ScalaCodeRendererContext)(
+  def generateAlternativeSanitizers(typeDef: TypeDefinition, context: ScalaCodeGeneratorContext)(
     implicit typeResolver: TypeResolver,
     typeNameProvider: TypeNameProvider): Seq[Option[ScalaCode]] = {
 
@@ -662,7 +665,7 @@ object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with Cod
     typeDef: TypeDefinition,
     included: Set[String],
     excluded: Set[String],
-    context: ScalaCodeRendererContext)(
+    context: ScalaCodeGeneratorContext)(
     implicit typeResolver: TypeResolver,
     typeNameProvider: TypeNameProvider): Option[ScalaCode] =
     Some(
@@ -722,7 +725,7 @@ object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with Cod
     typeDef: TypeDefinition,
     fieldGenerators:      => String,
     fieldsInitialization: => String,
-    context: ScalaCodeRendererContext): Seq[Option[ValueDefinition]] =
+    context: ScalaCodeGeneratorContext): Seq[Option[ValueDefinition]] =
     Seq(
       context.generatorsOpt.map(_ =>
         ValueDefinition(
@@ -746,7 +749,7 @@ object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with Cod
   def generateValidator(
     typeDef: TypeDefinition,
     objectValidator: => String,
-    context: ScalaCodeRendererContext
+    context: ScalaCodeGeneratorContext
   ): Seq[Option[ValueDefinition]] =
     Seq(
       context.validatorsOpt.map(_ =>
@@ -765,7 +768,7 @@ object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with Cod
     typeDef: TypeDefinition,
     sanitizers:    => Seq[Option[ScalaCode]],
     sanitizerList: => String,
-    context: ScalaCodeRendererContext): Seq[Option[ScalaCode]] =
+    context: ScalaCodeGeneratorContext): Seq[Option[ScalaCode]] =
     if (context.renderSanitizer) {
       if (typeDef.isInterface && typeDef.subtypes.nonEmpty)
         Seq(
@@ -794,14 +797,14 @@ object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with Cod
               modifier = Some("override"))))
     } else Seq()
 
-  def generateCustomObjectDeclaration(context: ScalaCodeRendererContext): Seq[Option[ScalaCode]] =
+  def generateCustomObjectDeclaration(context: ScalaCodeGeneratorContext): Seq[Option[ScalaCode]] =
     if (context.commonVals.isEmpty) Seq.empty
     else
       Seq(Some(Object(name = "Common", supertypes = Seq.empty, members = context.commonVals.map {
         case (value, name) => ValueDefinition(name = name, returnType = null, body = Seq(value))
       }.toSeq)))
 
-  def generateJsonFormats(typeDef: TypeDefinition, context: ScalaCodeRendererContext): Seq[Option[ScalaCode]] =
+  def generateJsonFormats(typeDef: TypeDefinition, context: ScalaCodeGeneratorContext): Seq[Option[ScalaCode]] =
     if (!context.renderPlayJson) Seq.empty
     else if (typeDef.isInterface)
       Seq(

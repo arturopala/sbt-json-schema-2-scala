@@ -52,7 +52,7 @@ object SbtJsonSchema2ScalaPlugin extends AutoPlugin {
         JsonSchema2ScalaGenerateScalaCodeTask.apply(
           jsonSchema2ScalaResources.value,
           jsonSchema2ScalaTargetDirectory.value,
-          ScalaCodeRendererOptions(
+          ScalaCodeGeneratorOptions(
             features = jsonSchema2ScalaFeatures.value,
             packageName = jsonSchema2ScalaPackageName.value
           )
@@ -71,10 +71,10 @@ object SbtJsonSchema2ScalaPlugin extends AutoPlugin {
     def apply(
       jsonSchemaSourceDirectory: File,
       scalaCodeTargetDirectory: File,
-      options: ScalaCodeRendererOptions): Seq[File] =
+      options: ScalaCodeGeneratorOptions): Seq[File] =
       process(jsonSchemaSourceDirectory, scalaCodeTargetDirectory, options)
 
-    def process(sourceDirectory: File, targetDirectory: File, options: ScalaCodeRendererOptions): Seq[File] = {
+    def process(sourceDirectory: File, targetDirectory: File, options: ScalaCodeGeneratorOptions): Seq[File] = {
       if (!targetDirectory.exists()) targetDirectory.mkdirs()
       val generatedScalaFiles = listFiles(sourceDirectory, suffix = ".json") match {
         case files: Seq[File] if files.nonEmpty =>
@@ -94,7 +94,7 @@ object SbtJsonSchema2ScalaPlugin extends AutoPlugin {
     def processJsonSchemas2Code(
       jsonSchemaFiles: Seq[File],
       targetDirectory: File,
-      options: ScalaCodeRendererOptions): Seq[File] = {
+      options: ScalaCodeGeneratorOptions): Seq[File] = {
 
       println(s"Processing ${jsonSchemaFiles.size} schemas(s) with options $options")
 
@@ -105,8 +105,8 @@ object SbtJsonSchema2ScalaPlugin extends AutoPlugin {
         case (schemaFile, definition) =>
           val target = new File(targetDirectory.getAbsolutePath + File.separator + schemaFile.name + ".scala")
           println(s"Generating ${schemaFile.name}.scala from ${schemaFile.file.getName}")
-          ScalaCodeRenderer
-            .render(
+          ScalaCodeGenerator
+            .generateCodeFrom(
               definition,
               options,
               s"Generated from JSON Schema ${schemaFile.file.getName}"
@@ -138,7 +138,7 @@ object SbtJsonSchema2ScalaPlugin extends AutoPlugin {
     def parseJsonSchemas(files: Seq[File]): Seq[SchemaFile] =
       files.map(SchemaFile.apply)
 
-    def options2Variables(options: ScalaCodeRendererOptions): Seq[(String, String)] =
+    def options2Variables(options: ScalaCodeGeneratorOptions): Seq[(String, String)] =
       Seq("package" -> s"package ${options.packageName}")
 
     def copyResourceTo(targetDirectory: File, variables: Seq[(String, String)])(resourcePath: String): File = {

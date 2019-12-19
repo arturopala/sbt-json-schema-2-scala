@@ -18,9 +18,9 @@ package uk.gov.hmrc.jsonschema2scala
 
 import uk.gov.hmrc.jsonschema2scala.schema.{ArraySchema, ObjectSchema, OneOfSchema, Schema, StringSchema}
 
-object ScalaCodeRendererContext extends CodeRendererUtils {
+object ScalaCodeGeneratorContext extends CodeGeneratorUtils {
 
-  def apply(schema: Schema, options: ScalaCodeRendererOptions): ScalaCodeRendererContext = {
+  def apply(schema: Schema, options: ScalaCodeGeneratorOptions): ScalaCodeGeneratorContext = {
 
     val uniqueKey = findUniqueKey(schema)
     val keys = findKeys(schema)
@@ -33,7 +33,7 @@ object ScalaCodeRendererContext extends CodeRendererUtils {
       .mapValues(m => if (m.size <= 1) m else m.toSeq.zipWithIndex.map { case ((k, v), i) => (k, v + i) }.toMap)
       .foldLeft[Map[String, String]](Map())((a, v) => a ++ v._2)
 
-    ScalaCodeRendererContext(options, uniqueKey, keys, externalizedStrings)
+    ScalaCodeGeneratorContext(options, uniqueKey, keys, externalizedStrings)
   }
 
   private def findUniqueKey(definition: Schema, path: List[Schema] = Nil): Option[(String, String)] =
@@ -100,8 +100,8 @@ object ScalaCodeRendererContext extends CodeRendererUtils {
     }
 }
 
-case class ScalaCodeRendererContext(
-  options: ScalaCodeRendererOptions,
+case class ScalaCodeGeneratorContext(
+  options: ScalaCodeGeneratorOptions,
   uniqueKey: Option[(String, String)],
   keys: Seq[(String, String)],
   commonVals: Map[String, String]) {
