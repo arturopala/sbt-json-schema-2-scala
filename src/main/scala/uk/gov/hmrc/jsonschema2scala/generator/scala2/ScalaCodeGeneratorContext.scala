@@ -16,11 +16,10 @@
 
 package uk.gov.hmrc.jsonschema2scala.generator.scala2
 
-import uk.gov.hmrc.jsonschema2scala.generator.CodeGeneratorUtils
 import uk.gov.hmrc.jsonschema2scala.schema._
 import uk.gov.hmrc.jsonschema2scala.typer.ScalaTypeNameProvider
 
-object ScalaCodeGeneratorContext extends CodeGeneratorUtils {
+object ScalaCodeGeneratorContext {
 
   def apply(schema: Schema, options: ScalaCodeGeneratorOptions): ScalaCodeGeneratorContext = {
 
@@ -100,6 +99,8 @@ object ScalaCodeGeneratorContext extends CodeGeneratorUtils {
         mapCommonVals(a.item, map)
       case _ => map
     }
+
+  def quoted(s: String): String = "\"\"\"" + s + "\"\"\""
 }
 
 case class ScalaCodeGeneratorContext(
@@ -122,4 +123,5 @@ case class ScalaCodeGeneratorContext(
   val playJsonOpt: Option[Unit] = toOption(options.features.contains(JsonSchema2ScalaFeature.PlayJson))
 
   def commonReference(s: String): String = commonVals.get(s).map(n => s"Common.$n").getOrElse(s)
+
 }

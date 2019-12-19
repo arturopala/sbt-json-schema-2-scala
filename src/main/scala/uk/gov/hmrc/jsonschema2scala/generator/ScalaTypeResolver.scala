@@ -38,15 +38,15 @@ class ScalaTypeResolver(
       case _: BooleanSchema => "Boolean"
       case _: NullSchema    => "Any"
 
-      case arraySchema: ArraySchema =>
-        s"Seq[${typeOf(arraySchema.item, viewpoint, wrapAsOption = false, showDefaultValue = false)}]"
-
       case objectSchema: ObjectSchema => schemaTypeNameAsSeenFrom(objectSchema, viewpoint)
 
       case mapSchema: MapSchema =>
         if (mapSchema.patternProperties.size == 1)
           s"Map[String,${typeOf(mapSchema.patternProperties.head, viewpoint, wrapAsOption = false, showDefaultValue = false)}]"
         else "Map[String,Any]"
+
+      case arraySchema: ArraySchema =>
+        s"Seq[${typeOf(arraySchema.item, viewpoint, wrapAsOption = false, showDefaultValue = false)}]"
 
       case oneOfSchema: OneOfSchema =>
         if (oneOfSchema.variants.isEmpty) "Nothing"
@@ -60,6 +60,9 @@ class ScalaTypeResolver(
 
       case externalReference: ExternalSchemaReference =>
         typeOf(externalReference.schema, viewpoint, wrapAsOption = false, showDefaultValue = false)
+
+      case schemaStub: SchemaStub =>
+        schemaTypeNameAsSeenFrom(schemaStub.reference, viewpoint)
     }
 
     if (!schema.mandatory && wrapAsOption) s"Option[$typeName]${if (showDefaultValue) " = None" else ""}"
@@ -79,8 +82,11 @@ class ScalaTypeResolver(
       .getOrElse(Set.empty)
   }
 
-  def schemaTypeNameAsSeenFrom(schema: Schema, viewpoint: TypeDefinition): String = {
-    val typeName = schemaUriToTypePath.get(schema.uri) match {
+  def schemaTypeNameAsSeenFrom(schema: Schema, viewpoint: TypeDefinition): String =
+    schemaTypeNameAsSeenFrom(schema.uri, viewpoint)
+
+  def schemaTypeNameAsSeenFrom(uri: String, viewpoint: TypeDefinition): String = {
+    val typeName = schemaUriToTypePath.get(uri) match {
       case Some(targetPath) =>
         val hostPath = viewpoint.path.reverse
         val guestPath = targetPath.reverse
@@ -88,7 +94,7 @@ class ScalaTypeResolver(
         relativePath.mkString(".")
 
       case None =>
-        throw new IllegalStateException(s"Unexpected error, cannot find type definition for schema ${schema.uri}")
+        throw new IllegalStateException(s"Unexpected error, cannot find type definition for schema $uri")
     }
 
     typeName

@@ -17,12 +17,12 @@
 package uk.gov.hmrc.jsonschema2scala.generator.scala2
 
 import uk.gov.hmrc.jsonschema2scala.generator.scala2.ScalaCode._
-import uk.gov.hmrc.jsonschema2scala.generator.{CodeGenerator, CodeGeneratorUtils, ScalaTypeResolver, TypeResolver}
+import uk.gov.hmrc.jsonschema2scala.generator.{CodeGenerator, ScalaTypeResolver, TypeResolver}
 import uk.gov.hmrc.jsonschema2scala.schema.NameUtils.{firstCharUppercase, normalize, pathLastPart, variableName}
 import uk.gov.hmrc.jsonschema2scala.schema._
 import uk.gov.hmrc.jsonschema2scala.typer.{ScalaTypeNameProvider, TypeDefinition, TypeDefinitionsBuilder, TypeNameProvider}
 
-object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators with CodeGeneratorUtils {
+object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
 
   val maxNumberOfArgs = 22
 
@@ -864,5 +864,9 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators with C
             returnType = s"Format[${typeDef.name}]",
             body = Seq("Json.format[${typeDef.name}]"),
             modifier = Some("implicit"))))
+
+  private def quoted(s: String): String = "\"\"\"" + s + "\"\"\""
+
+  private def defined[A]: PartialFunction[Option[A], A] = { case Some(x) => x }
 
 }

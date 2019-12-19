@@ -18,6 +18,20 @@ package uk.gov.hmrc.jsonschema2scala.schema
 
 object SchemaUtils {
 
+  def listSchemaUriToSchema(schema: Schema): Seq[(String, Schema)] =
+    Seq((schema.uri, schema)) ++ (schema match {
+      case s: ObjectSchema =>
+        s.properties.flatMap(listSchemaUriToSchema) ++ s.patternProperties
+          .map(_.flatMap(listSchemaUriToSchema))
+          .getOrElse(Seq.empty)
+      case s: MapSchema =>
+        s.patternProperties.flatMap(listSchemaUriToSchema)
+      case s: OneOfSchema =>
+        s.variants.flatMap(listSchemaUriToSchema)
+      case s: ArraySchema => listSchemaUriToSchema(s.item)
+      case _              => Seq.empty
+    })
+
   def copy(schema: Schema, name: String, path: List[String], description: Option[String]): Schema = schema match {
     case s: ObjectSchema =>
       s.copy(name = name, path = path, description = description.orElse(schema.description))
@@ -40,6 +54,8 @@ object SchemaUtils {
     case s: InternalSchemaReference =>
       s.copy(name = name, path = path, description = description.orElse(schema.description))
     case s: ExternalSchemaReference =>
+      s.copy(name = name, path = path, description = description.orElse(schema.description))
+    case s: SchemaStub =>
       s.copy(name = name, path = path, description = description.orElse(schema.description))
   }
 }

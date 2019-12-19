@@ -73,6 +73,26 @@ class ScalaCodeGeneratorSpec
                                  |}
                              """.stripMargin)
 
+    "render a simple schema with cyclic self-reference" in
+      assertCanParseAndCompile("""
+                                 |{
+                                 |  "$id": "http://example.com/test.json",
+                                 |  "description": "A test schema",
+                                 |  "type": "object",
+                                 |  "properties": {
+                                 |    "one": {
+                                 |      "$ref": "#/definitions/one"
+                                 |    }
+                                 |  },
+                                 |  "required": [ "one" ],
+                                 |  "definitions": {
+                                 |    "one": {
+                                 |      "$ref": "http://example.com/test.json"
+                                 |    }
+                                 |  }
+                                 |}
+                               """.stripMargin)
+
     "render a schema having deeply nested objects" in
       assertCanParseAndCompile("""
                                  |{

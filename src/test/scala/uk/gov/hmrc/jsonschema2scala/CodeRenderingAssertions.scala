@@ -51,11 +51,7 @@ trait CodeRenderingAssertions extends CompilationAssertions {
   def assertCanParseAndCompile(schemaJson: JsObject, packageName: String, className: String)(
     implicit compiler: Compiler): Unit = {
     val options = ScalaCodeGeneratorOptions(features = Set(), packageName = packageName)
-    val definition = SchemaReader
-      .read(
-        URI.create(s"schema://$className${packageName.split(".").reverse.mkString(".", ".", "")}/"),
-        className,
-        schemaJson)
+    val definition = SchemaReader.read(className, schemaJson)
     val code = ScalaCodeGenerator.generateCodeFrom(definition, options, "")
     assertSuccessAndCompiles(packageName, className, code, ClassAssertion(s"$packageName.$className"))
   }
@@ -71,7 +67,7 @@ trait CodeRenderingAssertions extends CompilationAssertions {
     val options = ScalaCodeGeneratorOptions(features = Set(), packageName = "a.b.c")
     val schemaJson = Json.parse(schemaString).as[JsObject]
     val name = randomName
-    val definition = SchemaReader.read(URI.create(s"schema://$name/"), name, schemaJson)
+    val definition = SchemaReader.read(name, schemaJson)
     ScalaCodeGenerator
       .generateCodeFrom(definition, options, description = "") should be leftSide
   }

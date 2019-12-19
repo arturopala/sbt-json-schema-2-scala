@@ -183,3 +183,18 @@ case class ExternalSchemaReference(
   override def mandatory: Boolean = requiredFields.contains(name)
   override def validate: Boolean = schema.validate
 }
+
+case class SchemaStub(name: String, path: List[String], description: Option[String] = None, reference: String)
+    extends Schema {
+
+  override val common: SchemaCommon = SchemaCommon()
+  override def mandatory: Boolean = false
+  override def validate: Boolean = false
+  override val isPrimitive: Boolean = false
+
+}
+
+object SchemaStub {
+  def apply(schema: Schema, reference: String): SchemaStub =
+    new SchemaStub(schema.name, schema.path, schema.description, reference)
+}

@@ -24,26 +24,33 @@ import scala.util.Try
 
 object SchemaReader {
 
-  def read(name: String, json: JsObject, references: Map[String, SchemaSource]): Schema =
-    read(URI.create(s"schema://$name"), name, json, Some(SourceMapReferenceResolver(references)))
+  def read(name: String, json: JsObject): Schema = {
+    val uri = attemptReadId(json).getOrElse(URI.create(s"schema://$name"))
+    read(uri, name, json, None)
+  }
+
+  def read(name: String, json: JsObject, references: Map[String, SchemaSource]): Schema = {
+    val uri = attemptReadId(json).getOrElse(URI.create(s"schema://$name"))
+    read(uri, name, json, Some(SourceMapReferenceResolver(references)))
+  }
 
   def read(uri: URI, name: String, json: JsObject, references: Map[String, SchemaSource]): Schema =
     read(uri, name, json, Some(SourceMapReferenceResolver(references)))
-
-  def read(uri: URI, name: String, json: JsObject, externalResolver: Option[SchemaReferenceResolver] = None): Schema =
-    readSchema(
-      name = name,
-      currentPath = SchemaReferenceResolver.rootPath(uri),
-      json = json,
-      requiredFields = Seq(""),
-      currentReferenceResolver = CachingReferenceResolver(uri, json, externalResolver)
-    )
 
   def readMany(sources: Seq[SchemaSource]): Seq[Schema] = {
     val references: Map[String, SchemaSource] = sources
       .map(schema => (schema.uri.toString, schema))
       .toMap
     sources.map(source => read(source.uri, source.name, source.json, Some(SourceMapReferenceResolver(references))))
+  }
+
+  def read(uri: URI, name: String, json: JsObject, externalResolver: Option[SchemaReferenceResolver] = None): Schema = {
+    val resolver = CachingReferenceResolver(uri, json, externalResolver)
+    val path = SchemaReferenceResolver.rootPath(uri)
+    resolver.lookup(uri.toString, (_, j) => readSchema(name, path, j, None, Seq(""), resolver)) match {
+      case None         => throw new IllegalStateException(s"Unexpected error, schema lookup failed for $uri")
+      case Some(schema) => schema
+    }
   }
 
   case class Parameters(
