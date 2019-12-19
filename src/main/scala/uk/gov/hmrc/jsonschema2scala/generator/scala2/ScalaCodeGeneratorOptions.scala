@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package uk.gov.hmrc.jsonschema2scala.generator
+package uk.gov.hmrc.jsonschema2scala.generator.scala2
 
 sealed trait JsonSchema2ScalaFeature
 

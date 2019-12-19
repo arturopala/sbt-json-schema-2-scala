@@ -14,7 +14,9 @@
  * limitations under the License.
  */
 
-package uk.gov.hmrc.jsonschema2scala.generator
+package uk.gov.hmrc.jsonschema2scala.generator.scala2
+
+import uk.gov.hmrc.jsonschema2scala.generator.{Code, CodeSink, TextUtils}
 
 sealed trait ScalaCode extends Code
 

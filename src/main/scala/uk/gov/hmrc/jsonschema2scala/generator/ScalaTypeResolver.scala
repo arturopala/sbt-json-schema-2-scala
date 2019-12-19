@@ -36,6 +36,7 @@ class ScalaTypeResolver(
       case _: NumberSchema  => "BigDecimal"
       case _: IntegerSchema => "Int"
       case _: BooleanSchema => "Boolean"
+      case _: NullSchema    => "Any"
 
       case arraySchema: ArraySchema =>
         s"Seq[${typeOf(arraySchema.item, viewpoint, wrapAsOption = false, showDefaultValue = false)}]"
