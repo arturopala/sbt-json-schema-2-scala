@@ -429,17 +429,17 @@ object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with Cod
       .map(prop => generateValueValidatorCall(prop, context))
       .collect { case Some(validator) => s"""$validator""".stripMargin }
     val validators =
-      if (typeDef.schema.alternatives.isEmpty) propertyValidatorsCalls
+      if (typeDef.schema.alternativeRequiredFields.isEmpty) propertyValidatorsCalls
       else
         propertyValidatorsCalls :+
-          s"""  checkIfOnlyOneSetIsDefined(${typeDef.schema.alternatives
+          s"""  checkIfOnlyOneSetIsDefined(${typeDef.schema.alternativeRequiredFields
             .map(_.map(a => {
               typeDef.schema.properties
                 .find(_.name == a)
                 .map(prop => s"_.$a${if (prop.isBoolean) ".asOption" else ""}")
                 .get
             }).mkString("Set(", ",", ")"))
-            .mkString("Seq(", ",", ")")},"${typeDef.schema.alternatives
+            .mkString("Seq(", ",", ")")},"${typeDef.schema.alternativeRequiredFields
             .map(_.mkString("{", ",", "}"))
             .mkString("[", ",", "]")}")"""
     validators.mkString(",\n  ")
@@ -540,13 +540,14 @@ object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with Cod
 
   def generateSanitizerList(typeDef: TypeDefinition): String = {
     val simpleSanitizerList = typeDef.schema.properties
-      .filter(p => !(p.mandatory && p.isPrimitive) && !typeDef.schema.alternatives.exists(_.contains(p.name)))
+      .filter(p =>
+        !(p.mandatory && p.isPrimitive) && !typeDef.schema.alternativeRequiredFields.exists(_.contains(p.name)))
       .take(maxNumberOfArgs)
       .map(prop => s"${prop.name}Sanitizer")
     val sanitizerList =
-      if (typeDef.schema.alternatives.isEmpty) simpleSanitizerList
+      if (typeDef.schema.alternativeRequiredFields.isEmpty) simpleSanitizerList
       else
-        simpleSanitizerList :+ s"${generateComposedFieldName(typeDef.schema.alternatives.map(_.head), "Or")}AlternativeSanitizer"
+        simpleSanitizerList :+ s"${generateComposedFieldName(typeDef.schema.alternativeRequiredFields.map(_.head), "Or")}AlternativeSanitizer"
     sanitizerList.mkString(",\n  ")
   }
 
@@ -617,7 +618,7 @@ object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with Cod
            """.stripMargin)
           )))
 
-    if (typeDef.schema.alternatives.isEmpty) simpleSanitizers
+    if (typeDef.schema.alternativeRequiredFields.isEmpty) simpleSanitizers
     else simpleSanitizers ++ generateAlternativeSanitizers(typeDef, context)
   }
 
@@ -625,30 +626,31 @@ object ScalaCodeRenderer extends CodeRenderer with KnownFieldGenerators with Cod
     implicit typeResolver: TypeResolver,
     typeNameProvider: TypeNameProvider): Seq[Option[ScalaCode]] = {
 
-    val compoundSanitizers: Seq[Option[ScalaCode]] = typeDef.schema.alternatives.toList
+    val compoundSanitizers: Seq[Option[ScalaCode]] = typeDef.schema.alternativeRequiredFields.toList
       .map(
         set =>
           generateCompoundSanitizer(
             typeDef,
             set,
-            typeDef.schema.alternatives.filterNot(_ == set).reduce(_ ++ _),
+            typeDef.schema.alternativeRequiredFields.filterNot(_ == set).reduce(_ ++ _),
             context))
 
     compoundSanitizers :+ Some(
       ValueDefinition(
-        name = s"${generateComposedFieldName(typeDef.schema.alternatives.map(_.head), "Or")}AlternativeSanitizer",
+        name =
+          s"${generateComposedFieldName(typeDef.schema.alternativeRequiredFields.map(_.head), "Or")}AlternativeSanitizer",
         returnType = "Update",
         body = Seq(
           s"""seed => entity =>
-             |          ${typeDef.schema.alternatives
+             |          ${typeDef.schema.alternativeRequiredFields
                .map(set =>
                  s"if(entity.${set.head}.isDefined) ${generateComposedFieldName(set.toSeq, "And")}CompoundSanitizer(seed)(entity)")
                .mkString("\nelse      ")}
-             |          else Generator.get(Gen.chooseNum(0,${typeDef.schema.alternatives.size - 1}))(seed) match {
-             |      ${typeDef.schema.alternatives.zipWithIndex
+             |          else Generator.get(Gen.chooseNum(0,${typeDef.schema.alternativeRequiredFields.size - 1}))(seed) match {
+             |      ${typeDef.schema.alternativeRequiredFields.zipWithIndex
                .map {
                  case (set, i) =>
-                   s"case ${if (i == typeDef.schema.alternatives.size - 1) "_" else s"Some($i)"} => ${generateComposedFieldName(set.toSeq, "And")}CompoundSanitizer(seed)(entity)"
+                   s"case ${if (i == typeDef.schema.alternativeRequiredFields.size - 1) "_" else s"Some($i)"} => ${generateComposedFieldName(set.toSeq, "And")}CompoundSanitizer(seed)(entity)"
                }
                .mkString("\n      ")}
              |    }

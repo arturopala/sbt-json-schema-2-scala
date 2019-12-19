@@ -42,8 +42,8 @@ case class ObjectSchema(
   description: Option[String] = None,
   mandatory: Boolean = false,
   properties: Seq[Schema] = Seq.empty,
-  required: Seq[String] = Seq.empty,
-  alternatives: Seq[Set[String]] = Seq.empty,
+  requiredFields: Seq[String] = Seq.empty,
+  alternativeRequiredFields: Seq[Set[String]] = Seq.empty,
   patternProperties: Option[Seq[Schema]] = None)
     extends Schema {
   override val isPrimitive: Boolean = false
@@ -59,7 +59,7 @@ case class MapSchema(
   mandatory: Boolean = false,
   patternProperties: Seq[Schema] = Seq.empty,
   requiredFields: Seq[String] = Seq.empty,
-  alternatives: Seq[Set[String]] = Seq.empty)
+  alternativeRequiredFields: Seq[Set[String]] = Seq.empty)
     extends Schema {
   override val isPrimitive: Boolean = false
   override def validate: Boolean = true
@@ -73,7 +73,7 @@ case class OneOfSchema(
   description: Option[String] = None,
   mandatory: Boolean = false,
   variants: Seq[Schema] = Seq.empty,
-  alternatives: Seq[Set[String]] = Seq.empty)
+  alternativeRequiredFields: Seq[Set[String]] = Seq.empty)
     extends Schema {
   override def validate: Boolean = variants.nonEmpty
   override val isPrimitive: Boolean = variants.forall(_.isPrimitive)
@@ -163,10 +163,10 @@ case class InternalSchemaReference(
   description: Option[String] = None,
   reference: String,
   schema: Schema,
-  required: Seq[String])
+  requiredFields: Seq[String])
     extends Schema {
   override val isPrimitive: Boolean = schema.isPrimitive
-  override def mandatory: Boolean = required.contains(name)
+  override def mandatory: Boolean = requiredFields.contains(name)
   override def validate: Boolean = schema.validate
 }
 
@@ -177,9 +177,9 @@ case class ExternalSchemaReference(
   description: Option[String] = None,
   reference: String,
   schema: Schema,
-  required: Seq[String])
+  requiredFields: Seq[String])
     extends Schema {
   override val isPrimitive: Boolean = schema.isPrimitive
-  override def mandatory: Boolean = required.contains(name)
+  override def mandatory: Boolean = requiredFields.contains(name)
   override def validate: Boolean = schema.validate
 }

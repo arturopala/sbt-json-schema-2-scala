@@ -14,7 +14,7 @@ sealed trait SchemaSource {
   def json: JsObject
 
   lazy val uri: URI = SchemaReader
-    .readId(json)
+    .attemptReadId(json)
     .getOrElse(defaultURI)
 
   def defaultURI: URI

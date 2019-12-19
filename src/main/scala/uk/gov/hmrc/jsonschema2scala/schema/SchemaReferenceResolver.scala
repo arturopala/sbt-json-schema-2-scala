@@ -15,6 +15,8 @@ trait SchemaReferenceResolver {
   def uriToPath(reference: String): List[String]
 
   def isInternal(reference: String): Boolean
+
+  def resolveUri(uri: URI): URI
 }
 
 object SchemaReferenceResolver {
@@ -30,20 +32,24 @@ object SchemaReferenceResolver {
 
 object CachingReferenceResolver {
 
-  def apply(uri: URI, schema: JsObject, upstreamResolver: Option[SchemaReferenceResolver]): SchemaReferenceResolver =
+  def apply(
+    rootUri: URI,
+    schema: JsObject,
+    upstreamResolver: Option[SchemaReferenceResolver]): SchemaReferenceResolver =
     new SchemaReferenceResolver {
 
-      val uriString: String = uri.toString
+      val rootUriString: String = rootUri.toString
+
       val cache: mutable.Map[String, Schema] = collection.mutable.Map[String, Schema]()
 
       override def lookup(reference: String, reader: SchemaReader): Option[Schema] =
         cache
           .get(reference)
           .orElse {
-            if (reference.startsWith("#") || reference.startsWith(uriString)) {
+            if (reference.startsWith("#") || reference.startsWith(rootUriString)) {
 
-              val relative = if (reference.startsWith(uriString)) {
-                reference.substring(uriString.length)
+              val relative = if (reference.startsWith(rootUriString)) {
+                reference.substring(rootUriString.length)
               } else reference
 
               val path: List[String] = relative.split("/").toList
@@ -68,14 +74,16 @@ object CachingReferenceResolver {
       override def uriToPath(reference: String): List[String] = {
         val uri = URI.create(reference)
         val (root, fragment) =
-          (if (uri.isAbsolute) reference.takeWhile(_ != '#') else uriString, "#" + uri.getFragment)
+          (if (uri.isAbsolute) reference.takeWhile(_ != '#') else rootUriString, "#" + uri.getFragment)
         (root :: fragment.split("/").toList).reverse
       }
 
       override def isInternal(reference: String): Boolean = {
         val uri2 = URI.create(reference)
-        !uri2.isAbsolute || sameOrigin(uri, uri2) || upstreamResolver.exists(_.isInternal(reference))
+        !uri2.isAbsolute || sameOrigin(rootUri, uri2) || upstreamResolver.exists(_.isInternal(reference))
       }
+
+      override def resolveUri(givenUri: URI): URI = rootUri.resolve(givenUri)
     }
 
   def sameOrigin(uri1: URI, uri2: URI): Boolean =
@@ -102,5 +110,7 @@ object SourceMapReferenceResolver {
       }
 
       override def isInternal(reference: String): Boolean = false
+
+      override def resolveUri(uri: URI): URI = uri
     }
 }
