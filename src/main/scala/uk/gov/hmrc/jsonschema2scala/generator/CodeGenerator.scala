@@ -14,12 +14,14 @@
  * limitations under the License.
  */
 
-package uk.gov.hmrc.jsonschema2scala
+package uk.gov.hmrc.jsonschema2scala.generator
 
-trait CodeGeneratorUtils {
+import uk.gov.hmrc.jsonschema2scala.schema.Schema
 
-  def quoted(s: String): String = "\"\"\"" + s + "\"\"\""
+trait CodeGenerator {
 
-  def defined[A]: PartialFunction[Option[A], A] = { case Some(x) => x }
+  type CodeGeneratorOptions
+  type CodeGeneratorResult = Either[List[String], Seq[Code]]
 
+  def generateCodeFrom(schema: Schema, options: CodeGeneratorOptions, description: String): CodeGeneratorResult
 }

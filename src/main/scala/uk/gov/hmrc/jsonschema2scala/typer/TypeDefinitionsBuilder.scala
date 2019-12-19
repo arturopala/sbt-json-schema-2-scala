@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package uk.gov.hmrc.jsonschema2scala
+package uk.gov.hmrc.jsonschema2scala.typer
 
 import uk.gov.hmrc.jsonschema2scala.schema._
 

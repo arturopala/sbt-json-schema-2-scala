@@ -33,7 +33,7 @@ package uk.gov.hmrc.jsonschema2scala
  */
 
 import org.scalatest.{Matchers, WordSpec}
-import uk.gov.hmrc.jsonschema2scala.TypeResolver.shortenPrefix
+import uk.gov.hmrc.jsonschema2scala.generator.TypeResolver.shortenPrefix
 
 class TypeResolverSpec extends WordSpec with Matchers with TestSchemas {
 

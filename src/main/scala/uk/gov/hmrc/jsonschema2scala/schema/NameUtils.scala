@@ -14,10 +14,9 @@
  * limitations under the License.
  */
 
-package uk.gov.hmrc.jsonschema2scala
-import java.util.regex.Pattern
+package uk.gov.hmrc.jsonschema2scala.schema
 
-import uk.gov.hmrc.jsonschema2scala.schema.Schema
+import java.util.regex.Pattern
 
 object NameUtils {
 

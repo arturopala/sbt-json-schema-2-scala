@@ -33,7 +33,7 @@ package uk.gov.hmrc.jsonschema2scala
  */
 
 import org.scalatest.{Matchers, WordSpec}
-import uk.gov.hmrc.jsonschema2scala.TextUtils.splitAndNormalize
+import uk.gov.hmrc.jsonschema2scala.generator.TextUtils.splitAndNormalize
 
 class TextUtilsSpec extends WordSpec with Matchers with TestSchemas {
 

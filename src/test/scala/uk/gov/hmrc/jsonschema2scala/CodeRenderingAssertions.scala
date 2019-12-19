@@ -20,6 +20,7 @@ import java.net.URI
 
 import org.scalatest.{Assertions, Matchers}
 import play.api.libs.json.{JsObject, Json}
+import uk.gov.hmrc.jsonschema2scala.generator.{ScalaCodeGenerator, ScalaCodeGeneratorOptions}
 import uk.gov.hmrc.jsonschema2scala.schema.{Schema, SchemaReader, SchemaSource}
 
 import scala.util.Random

@@ -21,6 +21,8 @@ import java.net.URLClassLoader
 import java.nio.file._
 import java.nio.file.attribute.BasicFileAttributes
 
+import uk.gov.hmrc.jsonschema2scala.generator.Code
+
 import scala.reflect.internal.util.{BatchSourceFile, Position}
 import scala.reflect.io.AbstractFile
 import scala.tools.nsc.reporters.AbstractReporter

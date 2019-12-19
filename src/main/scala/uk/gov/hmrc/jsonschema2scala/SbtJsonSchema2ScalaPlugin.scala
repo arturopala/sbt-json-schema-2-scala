@@ -20,6 +20,7 @@ import java.io._
 
 import sbt.Keys._
 import sbt._
+import uk.gov.hmrc.jsonschema2scala.generator.{Code, JsonSchema2ScalaFeature, ScalaCodeGenerator, ScalaCodeGeneratorOptions}
 import uk.gov.hmrc.jsonschema2scala.schema.{Schema, SchemaFile, SchemaReader}
 
 import scala.io.Source

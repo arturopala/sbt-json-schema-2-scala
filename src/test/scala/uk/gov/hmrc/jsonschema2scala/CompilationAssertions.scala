@@ -19,6 +19,7 @@ package uk.gov.hmrc.jsonschema2scala
 import java.nio.file.Paths
 
 import org.scalatest.Matchers
+import uk.gov.hmrc.jsonschema2scala.generator.Code
 
 trait CompilationAssertions {
   self: Matchers =>

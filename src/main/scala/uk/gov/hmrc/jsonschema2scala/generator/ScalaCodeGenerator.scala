@@ -14,11 +14,12 @@
  * limitations under the License.
  */
 
-package uk.gov.hmrc.jsonschema2scala
+package uk.gov.hmrc.jsonschema2scala.generator
 
-import uk.gov.hmrc.jsonschema2scala.NameUtils._
-import uk.gov.hmrc.jsonschema2scala.ScalaCode._
-import uk.gov.hmrc.jsonschema2scala.schema.{ArraySchema, BooleanSchema, ExternalSchemaReference, NumberSchema, ObjectSchema, OneOfSchema, Schema, StringSchema}
+import uk.gov.hmrc.jsonschema2scala.schema.NameUtils.{firstCharUppercase, normalize, pathLastPart, variableName}
+import uk.gov.hmrc.jsonschema2scala.generator.ScalaCode._
+import uk.gov.hmrc.jsonschema2scala.schema._
+import uk.gov.hmrc.jsonschema2scala.typer._
 
 object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators with CodeGeneratorUtils {
 
