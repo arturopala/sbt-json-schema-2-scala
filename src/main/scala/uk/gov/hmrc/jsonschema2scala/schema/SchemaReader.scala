@@ -29,23 +29,19 @@ object SchemaReader {
     read(uri, name, json, None)
   }
 
-  def read(name: String, json: JsObject, references: Map[String, SchemaSource]): Schema = {
+  def read(name: String, json: JsObject, otherSchemas: Seq[SchemaSource]): Schema = {
     val uri = attemptReadId(json).getOrElse(URI.create(s"schema://$name"))
-    read(uri, name, json, Some(SourceMapReferenceResolver(references)))
+    read(uri, name, json, Some(MultiSourceReferenceResolver(otherSchemas)))
   }
 
-  def read(uri: URI, name: String, json: JsObject, references: Map[String, SchemaSource]): Schema =
-    read(uri, name, json, Some(SourceMapReferenceResolver(references)))
+  def read(uri: URI, name: String, json: JsObject, otherSchemas: Seq[SchemaSource]): Schema =
+    read(uri, name, json, Some(MultiSourceReferenceResolver(otherSchemas)))
 
-  def readMany(sources: Seq[SchemaSource]): Seq[Schema] = {
-    val references: Map[String, SchemaSource] = sources
-      .map(schema => (schema.uri.toString, schema))
-      .toMap
-    sources.map(source => read(source.uri, source.name, source.json, Some(SourceMapReferenceResolver(references))))
-  }
+  def readMany(sources: Seq[SchemaSource]): Seq[Schema] =
+    sources.map(source => read(source.uri, source.name, source.json, Some(MultiSourceReferenceResolver(sources))))
 
   def read(uri: URI, name: String, json: JsObject, externalResolver: Option[SchemaReferenceResolver] = None): Schema = {
-    val resolver = CachingReferenceResolver(uri, json, externalResolver)
+    val resolver = CachingReferenceResolver(uri, name, json, externalResolver)
     val path = SchemaReferenceResolver.rootPath(uri)
     resolver.lookup(uri.toString, (_, j) => readSchema(name, path, j, None, Seq(""), resolver)) match {
       case None         => throw new IllegalStateException(s"Unexpected error, schema lookup failed for $uri")
@@ -76,7 +72,7 @@ object SchemaReader {
     val id: Option[URI] = attemptReadId(json)
 
     val (referenceResolver, path) =
-      decideResolverAndPath(currentPath, json, currentReferenceResolver, id)
+      decideResolverAndPath(name, currentPath, json, currentReferenceResolver, id)
 
     val description: Option[String] = externalDescription.orElse(attemptReadDescription(json))
 
@@ -106,13 +102,14 @@ object SchemaReader {
       .map(_.normalize())
 
   def decideResolverAndPath(
+    name: String,
     path: List[String],
     json: JsObject,
     referenceResolver: SchemaReferenceResolver,
     id: Option[URI]): (SchemaReferenceResolver, List[String]) =
     id.map { uri =>
         val uri2 = if (uri.isAbsolute) uri else referenceResolver.resolveUri(uri)
-        (CachingReferenceResolver(uri2, json, Some(referenceResolver)), SchemaReferenceResolver.rootPath(uri))
+        (CachingReferenceResolver(uri2, name, json, Some(referenceResolver)), SchemaReferenceResolver.rootPath(uri))
       }
       .getOrElse((referenceResolver, path))
 
@@ -298,21 +295,47 @@ object SchemaReader {
   def attemptReadEnum(p: Parameters): Option[Schema] =
     (p.json \ "enum")
       .asOpt[JsArray]
-      .map {
+      .flatMap {
         case jsArray @ JsArray(array) if array.nonEmpty =>
           if (array.forall(_.isInstanceOf[JsString])) {
-            StringSchema(
-              name = p.name,
-              path = p.path,
-              common = p.common,
-              description = p.description,
-              mandatory = p.isMandatory,
-              enum = Some(array.map(_.as[String])))
+            Some(
+              StringSchema(
+                name = p.name,
+                path = p.path,
+                common = p.common,
+                description = p.description,
+                mandatory = p.isMandatory,
+                enum = Some(array.map(_.as[String]))))
           } else if (array.forall(_.isInstanceOf[JsObject])) {
-            readOneOfSchema(p, jsArray, Seq.empty)
+            Some(readOneOfSchema(p, jsArray, Seq.empty))
+          } else if (array.forall(_.isInstanceOf[JsArray])) {
+            array.length match {
+              case 1 =>
+                array.head match {
+                  case json: JsObject =>
+                    Some(readSchema(p.name, p.path, json, p.description, p.requiredFields, p.referenceResolver))
+
+                  case array: JsArray =>
+                    Some(
+                      ArraySchema(
+                        p.name,
+                        p.path,
+                        p.common,
+                        p.description,
+                        p.isMandatory,
+                        None,
+                        Some(0),
+                        Some(array.value.length)))
+
+                  case other =>
+                    throw new IllegalStateException(s"Invalid enum array element, expected an object, but got $other.")
+                }
+              case other =>
+                throw new IllegalStateException(s"Unsupported schema, multi-array enum: $other.")
+            }
           } else {
             throw new IllegalStateException(
-              s"Invalid enum definition, expected an array of strings or objects, but got $jsArray.")
+              s"Unsupported enum definition, expected an array of strings or objects, but got $jsArray.")
           }
 
         case other =>

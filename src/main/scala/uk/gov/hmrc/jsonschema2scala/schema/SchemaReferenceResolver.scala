@@ -39,10 +39,13 @@ object SchemaReferenceResolver {
 
   def rootPath(uri: URI): List[String] = "#" :: uri.toString :: Nil
 
-  def pathToUri(path: List[String]): String = path.reverse.filterNot(_.isEmpty) match {
-    case Nil     => ""
-    case x :: xs => (if (x == "#") "#/" else x) + xs.mkString("/")
-  }
+  def pathToUri(path: List[String]): String =
+    path.reverse.filterNot(_.isEmpty) match {
+      case Nil           => ""
+      case x :: Nil      => x
+      case x :: y :: Nil => if (y == "#") x else s"$x/$y"
+      case x :: xs       => (if (x == "#") "#/" else x) + xs.mkString("/")
+    }
 
 }
 
@@ -50,57 +53,70 @@ object CachingReferenceResolver {
 
   def apply(
     rootUri: URI,
+    schemaName: String,
     schema: JsObject,
     upstreamResolver: Option[SchemaReferenceResolver]): SchemaReferenceResolver = upstreamResolver match {
-    case Some(resolver @ CachingReferenceResolver(`rootUri`, _, _)) => resolver
-    case _                                                          => CachingReferenceResolver(rootUri, schema, upstreamResolver)
+    case Some(resolver @ CachingReferenceResolver(`rootUri`, _, _, _)) => resolver
+    case _                                                             => CachingReferenceResolver(rootUri, schemaName, schema, upstreamResolver)
   }
 
-  def sameOrigin(uri1: URI, uri2: URI): Boolean =
-    uri1.getScheme == uri2.getScheme && uri1.getHost == uri2.getHost && uri1.getPath == uri2.getPath
-
-  val emptyJsObject = JsObject(Seq())
-
-  case class CachingReferenceResolver(rootUri: URI, schema: JsObject, upstreamResolver: Option[SchemaReferenceResolver])
+  case class CachingReferenceResolver(
+    rootUri: URI,
+    schemaName: String,
+    json: JsObject,
+    upstreamResolver: Option[SchemaReferenceResolver])
       extends SchemaReferenceResolver {
 
     val rootUriString: String = rootUri.toString
 
     val cache: mutable.Map[String, Schema] = collection.mutable.Map[String, Schema]()
 
-    override def lookup(reference: String, reader: SchemaReader): Option[Schema] =
+    override def lookup(reference: String, reader: SchemaReader): Option[Schema] = {
+
+      val uri: URI = URI.create(reference)
+
+      val (absolute, relative, isRelative) = if (uri.isAbsolute) {
+        (uri.toString, rootUri.relativize(uri).toString, false)
+      } else {
+        (rootUri.resolve(reference).toString, reference, true)
+      }
+
       cache
-        .get(reference)
+        .get(absolute)
         .orElse {
-          if (reference.startsWith("#") || reference.startsWith(rootUriString)) {
+          if (isRelative || absolute.startsWith(rootUriString)) {
 
-            val relative = if (reference.startsWith(rootUriString)) {
-              reference.substring(rootUriString.length)
-            } else reference
+            val jsonPointer: List[String] = relative
+              .split("/")
+              .filterNot(_.isEmpty)
+              .dropWhile(_ == "#")
+              .toList
 
-            val path: List[String] = relative.split("/").toList
+            val name = if (jsonPointer.isEmpty) schemaName else jsonPointer.last
 
-            // prevent cycles by caching a stub
-            val uri = SchemaReferenceResolver.pathToUri(uriToPath(reference))
-            val stub = SchemaStub(reader(path.last, emptyJsObject), uri)
-            cache.update(reference, stub)
-
-            val result: Option[Schema] = path
-              .dropWhile(s => s == "#" || s == "")
-              .foldLeft[JsLookup](schema)((s, p) => s \ p)
+            val result: Option[Schema] = jsonPointer
+              .foldLeft[JsLookup](json)((s, p) => s \ p)
               .result
               .asOpt[JsObject]
-              .map(reader(path.last, _))
+              .map { schemaJson =>
+                // prevent cycles by caching a schema stub
+                val stub = SchemaStub(reader(name, emptyJsObject), absolute)
+                cache.update(absolute, stub)
+
+                val schema: Schema = reader(name, schemaJson)
+
+                cache.update(absolute, schema)
+                schema
+              }
 
             result
 
           } else None
         }
-        .orElse(if (reference.startsWith("#")) None else upstreamResolver.flatMap(_.lookup(reference, reader)))
-        .map { s =>
-          cache.update(reference, s)
-          s
+        .orElse {
+          if (isRelative) None else upstreamResolver.flatMap(_.lookup(reference, reader))
         }
+    }
 
     override def uriToPath(reference: String): List[String] = {
       val uri = URI.create(reference)
@@ -118,19 +134,30 @@ object CachingReferenceResolver {
 
     override def resolveUri(givenUri: URI): URI = rootUri.resolve(givenUri)
   }
+
+  def sameOrigin(uri1: URI, uri2: URI): Boolean =
+    uri1.getScheme == uri2.getScheme && uri1.getHost == uri2.getHost && uri1.getPath == uri2.getPath
+
+  val emptyJsObject = JsObject(Seq())
 }
 
-object SourceMapReferenceResolver {
+object MultiSourceReferenceResolver {
 
   def apply(
-    references: Map[String, SchemaSource],
+    schemaSources: Seq[SchemaSource],
     upstreamResolver: Option[SchemaReferenceResolver] = None): SchemaReferenceResolver =
     new SchemaReferenceResolver {
 
+      lazy val resolvers: Seq[SchemaReferenceResolver] =
+        schemaSources.map(s => CachingReferenceResolver(s.uri, s.name, s.json, None))
+
       override def lookup(reference: String, reader: SchemaReader): Option[Schema] =
-        references
-          .get(reference)
-          .map(s => reader.apply(s.name, s.json))
+        resolvers
+          .foldLeft[Option[Schema]](None)(
+            (a, r) =>
+              a.orElse(
+                r.lookup(reference, reader)
+            ))
           .orElse(upstreamResolver.flatMap(_.lookup(reference, reader)))
 
       override def uriToPath(reference: String): List[String] = {

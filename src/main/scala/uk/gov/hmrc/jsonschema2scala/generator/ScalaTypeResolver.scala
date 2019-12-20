@@ -98,7 +98,7 @@ class ScalaTypeResolver(
         relativePath.mkString(".")
 
       case None =>
-        throw new IllegalStateException(s"Unexpected error, cannot find type definition for schema $uri")
+        throw new IllegalStateException(s"Resolving type of schema $uri, but the type definition unknown.")
     }
 
     typeName

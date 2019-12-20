@@ -436,8 +436,8 @@ class ScalaCodeGeneratorSpec
                                  |  }
                                  |}""".stripMargin)
 
-    verifiedTestSchemas.foreach { schema: SchemaSource =>
-      s"generate from ${schema.name}" in assertCanParseAndCompile(schema, verifiedTestReferences)
+    verifiedTestSchemas /*.filter(_.name == "Entity15.schema.json")*/.foreach { schema: SchemaSource =>
+      s"generate from ${schema.name}" in assertCanParseAndCompile(schema, verifiedTestSchemas)
     }
   }
 

@@ -22,25 +22,21 @@ import scala.util.Try
 
 trait TestSchemas {
 
-  lazy val testSchemas: Seq[SchemaSource] = testSchemaList
-    .map { filename =>
-      Try(classOf[SchemaReaderSpec].getResourceAsStream(f"/schemas/$filename")).map {
-        SchemaResource(_, filename)
-      }.toOption
-    }
+  lazy val allSchemas: Seq[SchemaSource] = unverifiedTestSchemas ++ verifiedTestSchemas
+
+  lazy val unverifiedTestSchemas: Seq[SchemaSource] = testSchemaList
+    .map(readSchemaSource)
     .collect { case Some(x) => x }
 
   lazy val verifiedTestSchemas: Seq[SchemaSource] = verifiedTestSchemaList
-    .map { filename =>
-      Try(classOf[SchemaReaderSpec].getResourceAsStream(f"/schemas/$filename")).map {
-        SchemaResource(_, filename)
-      }.toOption
-    }
+    .map(readSchemaSource)
     .collect { case Some(x) => x }
 
-  lazy val testReferences: Map[String, SchemaSource] = testSchemas.map(s => (s.uri.toString, s)).toMap
-
-  lazy val verifiedTestReferences: Map[String, SchemaSource] = verifiedTestSchemas.map(s => (s.uri.toString, s)).toMap
+  def readSchemaSource: String => Option[SchemaResource] = { filename =>
+    Try(classOf[SchemaReaderSpec].getResourceAsStream(f"/schemas/$filename")).map {
+      SchemaResource(_, filename)
+    }.toOption
+  }
 
   val verifiedTestSchemaList = Seq(
     "E01.schema.json",

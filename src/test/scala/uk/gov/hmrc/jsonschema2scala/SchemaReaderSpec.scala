@@ -38,10 +38,10 @@ import uk.gov.hmrc.jsonschema2scala.schema.SchemaReader
 class SchemaReaderSpec extends WordSpec with Matchers with TestSchemas {
 
   "SchemaReader" should {
-    testSchemas.foreach { schema =>
+    allSchemas.foreach { schema =>
       s"read ${schema.name} schema" in {
         val json = schema.json
-        val definition = SchemaReader.read(schema.name, json, testReferences)
+        val definition = SchemaReader.read(schema.name, json, allSchemas)
         definition.isPrimitive shouldBe false
       }
     }
