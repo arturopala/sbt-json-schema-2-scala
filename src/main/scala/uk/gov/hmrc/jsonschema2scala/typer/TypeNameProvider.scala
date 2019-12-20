@@ -26,6 +26,6 @@ trait TypeNameProvider {
 
   def toTypePatternName(schema: Schema): String
 
-  def safe(name: String): String
+  def toIdentifier(name: String): String
 
 }

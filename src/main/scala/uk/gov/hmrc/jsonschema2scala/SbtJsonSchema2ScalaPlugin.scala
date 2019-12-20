@@ -103,27 +103,34 @@ object SbtJsonSchema2ScalaPlugin extends AutoPlugin {
       val schemaSources: Seq[SchemaFile] = parseJsonSchemas(jsonSchemaFiles)
       val schemas: Seq[(SchemaFile, Schema)] = schemaSources.zip(SchemaReader.readMany(schemaSources))
 
-      schemas.map {
-        case (schemaFile, definition) =>
-          val target = new File(targetDirectory.getAbsolutePath + File.separator + schemaFile.name + ".scala")
-          println(s"Generating ${schemaFile.name}.scala from ${schemaFile.file.getName}")
-          ScalaCodeGenerator
-            .generateCodeFrom(
-              definition,
-              options,
-              s"Generated from JSON Schema ${schemaFile.file.getName}"
-            )
-            .fold(
-              errors => {
-                println(errors.zipWithIndex.map { case (e, i) => s"[$i] $e" }.mkString("\n"))
-              },
-              code => {
-                val content = Code.toString(code)
-                writeToFile(target, content)
-              }
-            )
-          target
-      }
+      schemas
+        .map {
+          case (schemaFile, definition) =>
+            ScalaCodeGenerator
+              .generateCodeFrom(
+                definition,
+                options,
+                s"Generated from JSON Schema ${schemaFile.file.getName}"
+              )
+              .fold(
+                errors => {
+                  println(errors.zipWithIndex.map { case (e, i) => s"[$i] $e" }.mkString("\n"))
+                  None
+                }, {
+                  case (packageName, className, code) => {
+                    val content = Code.toString(code)
+                    val directoryPath = packageName.split(".").mkString(File.separator)
+                    val outputDirectory = new File(targetDirectory.getAbsolutePath + File.separator + directoryPath)
+                    outputDirectory.mkdirs()
+                    val outputFile = new File(outputDirectory, s"$className.scala")
+                    println(s"Generating ${outputFile.toString} from ${schemaFile.file.getName}")
+                    writeToFile(outputFile, content)
+                    Some(outputFile)
+                  }
+                }
+              )
+        }
+        .collect { case Some(x) => x }
     }
 
     def filesSupportingFeature(feature: JsonSchema2ScalaFeature): Seq[String] = feature match {

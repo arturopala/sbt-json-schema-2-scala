@@ -21,18 +21,18 @@ import uk.gov.hmrc.jsonschema2scala.schema.{ExternalSchemaReference, InternalSch
 
 object ScalaTypeNameProvider extends TypeNameProvider {
 
-  def toTypeName(schema: Schema): String = {
-    val schemaName = schema match {
+  override def toTypeName(schema: Schema): String = {
+    val name = schema match {
       case i: InternalSchemaReference =>
         i.schema.name
       case e: ExternalSchemaReference =>
         e.schema.name
       case s => s.name
     }
-    firstCharUppercase(normalize(schemaName))
+    firstCharUppercase(normalize(name))
   }
 
-  override def safe(name: String): String =
+  override def toIdentifier(name: String): String =
     if (name.exists(noNameChars.contains) || scalaKeywords.contains(name)) s"`$name`" else name
 
   override def toTypeNameVariant(schema: Schema, pos: Int): String =

@@ -20,7 +20,7 @@ import java.util.regex.Pattern
 
 object NameUtils {
 
-  final val NORMALIZE_PATTERN = Pattern.compile("""([_/@:$-]+?\w)""")
+  final val NORMALIZE_PATTERN = Pattern.compile("""([_/@:$.-]+?\w)""")
 
   final def normalize(text: String): String = {
     val m = NORMALIZE_PATTERN.matcher(text)
@@ -28,7 +28,7 @@ object NameUtils {
     var last = 0
     while (m.find) {
       sb.append(text.substring(last, m.start))
-      sb.append(m.group(0).replaceAll("[_/@:$-]", "").toUpperCase)
+      sb.append(m.group(0).replaceAll("[_/@:$.-]", "").toUpperCase)
       last = m.end
     }
     sb.append(text.substring(last))

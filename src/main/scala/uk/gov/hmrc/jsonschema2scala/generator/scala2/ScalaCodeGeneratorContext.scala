@@ -26,38 +26,38 @@ object ScalaCodeGeneratorContext {
     val uniqueKey = findUniqueKey(schema)
     val keys = findKeys(schema)
 
-    val externalizedStrings = mapCommonVals(schema, Map.empty.withDefaultValue(Nil))
-      .mapValues(list => {
-        list.map(_.replaceAll("\\d", "")).distinct.minBy(_.length)
-      })
-      .groupBy { case (_, v) => v }
+    val externalizedStrings = mapCommonVals(schema)
+      .groupBy(_._1)
+      .mapValues(_.map(_._2).map(_.replaceAll("\\d", "")).distinct.minBy(_.length))
+      .groupBy(_._2)
       .mapValues(m => if (m.size <= 1) m else m.toSeq.zipWithIndex.map { case ((k, v), i) => (k, v + i) }.toMap)
       .foldLeft[Map[String, String]](Map())((a, v) => a ++ v._2)
 
     ScalaCodeGeneratorContext(options, uniqueKey, keys, externalizedStrings)
   }
 
-  private def findUniqueKey(definition: Schema, path: List[Schema] = Nil): Option[(String, String)] =
-    definition match {
+  private def findUniqueKey(schema: Schema, path: List[Schema] = Nil): Option[(String, String)] =
+    (schema match {
       case s: StringSchema => if (s.isUniqueKey) Some((accessorFor(s :: path), s.name)) else None
       case o: ObjectSchema =>
         o.properties.foldLeft[Option[(String, String)]](None)((a, p) => a.orElse(findUniqueKey(p, o :: path)))
       case _ => None
-    }
+    }).orElse(schema.common.definitions
+      .foldLeft[Option[(String, String)]](None)((a, p) => a.orElse(findUniqueKey(p, path))))
 
-  private def findKeys(definition: Schema, path: List[Schema] = Nil): Seq[(String, String)] =
-    definition match {
+  private def findKeys(schema: Schema, path: List[Schema] = Nil): Seq[(String, String)] =
+    (schema match {
       case s: StringSchema => if (s.isKey) Seq((accessorFor(s :: path), s.name)) else Seq.empty
       case o: ObjectSchema =>
-        o.properties.map(findKeys(_, o :: path)).reduce(_ ++ _)
+        o.properties.flatMap(findKeys(_, o :: path))
       case _ => Seq.empty
-    }
+    }) ++ schema.common.definitions.flatMap(s => findKeys(s, s :: path))
 
   private def accessorFor(path: List[Schema], nested: String = "", option: Boolean = false): String = path match {
     case (o: ObjectSchema) :: xs =>
       val prefix =
         if (o.name.isEmpty) ""
-        else if (o.mandatory) s"${ScalaTypeNameProvider.safe(o.name)}."
+        else if (o.mandatory) s"${ScalaTypeNameProvider.toIdentifier(o.name)}."
         else s"${o.name}.${if (option) "flatMap" else "map"}(_."
       val suffix = if (o.name.isEmpty) "" else if (!o.mandatory) ")" else ""
       accessorFor(xs, prefix + nested + suffix, !o.mandatory || option)
@@ -66,39 +66,35 @@ object ScalaCodeGeneratorContext {
     case Nil => if (option) nested else s"Option($nested)"
   }
 
-  private def externalizePattern(s: StringSchema, map: Map[String, List[String]]): Map[String, List[String]] =
-    s.pattern
+  private def externalizePattern(schema: StringSchema): Seq[(String, String)] =
+    schema.pattern
       .map(p => {
         val key = quoted(p)
-        map
-          .get(key)
-          .map(list => map.updated(key, s"${s.name}Pattern" :: list))
-          .getOrElse(map.+(key -> List(s"${s.name}Pattern")))
+        (key, s"${schema.name}Pattern")
       })
-      .getOrElse(map)
+      .toSeq
 
-  private def externalizeEnum(s: StringSchema, map: Map[String, List[String]]): Map[String, List[String]] =
-    s.enum
-      .map(e => {
-        val key = s"""Seq(${e.mkString("\"", "\",\"", "\"")})"""
-        map
-          .get(key)
-          .map(list => map.updated(key, s"${s.name}Enum" :: list))
-          .getOrElse(map.+(key -> List(s"${s.name}Enum")))
+  private def externalizeEnum(schema: StringSchema): Seq[(String, String)] =
+    schema.enum
+      .map(e => (s"""Seq(${e.mkString("\"", "\",\"", "\"")})""", s"${schema.name}Enum"))
+      .toSeq
+
+  private def mapCommonVals(schema: Schema): Seq[(String, String)] =
+    schema.common.definitions.flatMap(mapCommonVals) ++
+      (schema match {
+        case stringSchema: StringSchema =>
+          externalizePattern(stringSchema) ++ externalizeEnum(stringSchema)
+        case objectSchema: ObjectSchema =>
+          val m1 = objectSchema.properties.flatMap(mapCommonVals)
+          objectSchema.patternProperties.map(_.flatMap(mapCommonVals)).getOrElse(m1)
+        case mapSchema: MapSchema =>
+          mapSchema.patternProperties.flatMap(mapCommonVals)
+        case oneOfSchema: OneOfSchema =>
+          oneOfSchema.variants.flatMap(mapCommonVals)
+        case arraySchema: ArraySchema =>
+          mapCommonVals(arraySchema.item)
+        case _ => Seq.empty
       })
-      .getOrElse(map)
-
-  private def mapCommonVals(definition: Schema, map: Map[String, List[String]]): Map[String, List[String]] =
-    definition match {
-      case s: StringSchema => externalizePattern(s, map) ++ externalizeEnum(s, map)
-      case o: ObjectSchema =>
-        o.properties.foldLeft(map)((m, p) => mapCommonVals(p, m))
-      case o: OneOfSchema =>
-        o.variants.foldLeft(map)((m, p) => mapCommonVals(p, m))
-      case a: ArraySchema =>
-        mapCommonVals(a.item, map)
-      case _ => map
-    }
 
   def quoted(s: String): String = "\"\"\"" + s + "\"\"\""
 }

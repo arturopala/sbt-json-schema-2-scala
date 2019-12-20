@@ -29,13 +29,17 @@ trait CompilationAssertions {
   }
 
   def assertSuccessAndCompiles(
-    packageName: String,
-    className: String,
-    renderingResult: Either[List[String], Seq[Code]],
+    renderingResult: Either[List[String], (String, String, Seq[Code])],
     assertions: Assertion[ClassLoader]*)(implicit compiler: Compiler): Unit =
-    renderingResult.fold(
-      errors => fail(errors.mkString(", ")),
-      (sourceCodeUnits: Seq[Code]) => assertCompiles(packageName, className, sourceCodeUnits, assertions: _*)
+    renderingResult.fold[Unit](
+      errors => fail(errors.mkString(", ")), {
+        case (packageName: String, className: String, sourceCodeUnits: Seq[Code]) =>
+          assertCompiles(
+            packageName,
+            className,
+            sourceCodeUnits,
+            assertions :+ ClassAssertion(s"$packageName.$className"): _*)
+      }
     )
 
   def assertCompiles(

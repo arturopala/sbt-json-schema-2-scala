@@ -44,7 +44,7 @@ class ScalaCodeGeneratorMoreSpec
     compiler.cleanup()
 
   "JsonSchema2ScalaCodeRenderer" should {
-    testSchemas.filter(_.name.matches("avro-avsc.json")).foreach { schema: SchemaSource =>
+    testSchemas.filter(_.name.matches("angular.schema.json")).foreach { schema: SchemaSource =>
       s"render ${schema.name} schema" in assertCanParseAndCompile(schema, testReferences)
     }
   }

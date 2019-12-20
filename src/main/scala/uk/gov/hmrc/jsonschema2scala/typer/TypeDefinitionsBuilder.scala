@@ -21,8 +21,9 @@ import uk.gov.hmrc.jsonschema2scala.schema._
 object TypeDefinitionsBuilder {
 
   def buildFrom(schema: Schema)(implicit typeNameProvider: TypeNameProvider): Either[List[String], TypeDefinition] = {
+    val name = typeNameProvider.toTypeName(schema)
     val types = TypeDefinitionsBuilder
-      .processSchema(schema.name, Nil, schema)
+      .processSchema(name, Nil, schema)
       .map { definition =>
         definition.copy(externalImports = TypeDefinitionsBuilder.calculateExternalImports(definition.schema))
       }
@@ -31,7 +32,7 @@ object TypeDefinitionsBuilder {
     if (types.isEmpty) Left(s"Schema ${schema.uri} is not valid for type definition" :: Nil)
     else if (types.size == 1) Right(types.head)
     else {
-      types.find(_.name == schema.name) match {
+      types.find(_.name == name) match {
 
         case Some(typeDef) => {
           val embeddedTypes: Seq[TypeDefinition] = types
@@ -44,7 +45,7 @@ object TypeDefinitionsBuilder {
         case None =>
           Right(
             TypeDefinition(
-              schema.name,
+              name,
               Nil,
               ObjectSchema(
                 name = schema.name,

@@ -90,8 +90,9 @@ object SchemaReader {
     attemptReadByType(p)
       .orElse { attemptReadReference(p) }
       .orElse { attemptReadOneOf(p) }
-      .orElse { attemptReadConstant(p) }
       .orElse { attemptReadObjectIfProperties(p) }
+      .orElse { attemptReadConstant(p) }
+      .orElse { attemptReadEnum(p) }
       .getOrElse {
         // fallback to read object schema with implicit properties
         readObjectSchema(p.copy(json = JsObject(Seq("properties" -> json))))
@@ -118,6 +119,14 @@ object SchemaReader {
   def attemptReadDescription(json: JsObject): Option[String] =
     (json \ "description").asOpt[String]
 
+  /*
+    6.1.1. type
+    The value of this keyword MUST be either a string or an array.
+    If it is an array, elements of the array MUST be strings and MUST be unique.
+    String values MUST be one of the six primitive types
+    ("null", "boolean", "object", "array", "number", or "string"),
+    or "integer" which matches any number with a zero fractional part.
+   */
   def attemptReadByType(p: Parameters): Option[Schema] =
     (p.json \ "type")
       .asOpt[JsValue]
@@ -219,7 +228,7 @@ object SchemaReader {
     (p.json \ "oneOf")
       .asOpt[JsArray]
       .map { array =>
-        readOneOfSchema(p.copy(path = "oneOf" :: p.path), array, alternativeRequiredFields)
+        readOneOfSchema(p, array, alternativeRequiredFields)
       }
 
   def readOneOfSchema(p: Parameters, array: JsArray, alternativeRequiredFields: Seq[Set[String]]): OneOfSchema = {
@@ -246,28 +255,68 @@ object SchemaReader {
     )
   }
 
-  def attemptReadConstant(p: Parameters): Option[StringSchema] =
+  def attemptReadObjectIfProperties(p: Parameters): Option[Schema] =
+    (p.json \ "properties")
+      .asOpt[JsValue]
+      .map { _ =>
+        readObjectSchema(p)
+      }
+
+  /*
+    6.1.3. const
+    The value of this keyword MAY be of any type, including null.
+    Use of this keyword is functionally equivalent to an "enum" with a single value.
+   */
+  def attemptReadConstant(p: Parameters): Option[Schema] =
     (p.json \ "const")
       .asOpt[JsValue]
       .map {
         case JsString(value) =>
           StringSchema(
             name = p.name,
-            path = "const" :: p.path,
+            path = p.path,
             common = p.common,
             description = p.description,
             mandatory = p.isMandatory,
             enum = Some(Seq(value)))
 
+        case json: JsObject =>
+          readObjectSchema(p.copy(json = json))
+
         case other =>
-          throw new IllegalStateException(s"Unsupported const definition, expected string value, but got $other.")
+          throw new IllegalStateException(
+            s"Unsupported const definition, expected a string or an object, but got $other.")
       }
 
-  def attemptReadObjectIfProperties(p: Parameters): Option[Schema] =
-    (p.json \ "properties")
-      .asOpt[JsValue]
-      .map { _ =>
-        readObjectSchema(p)
+  /*
+    6.1.2. enum
+    The value of this keyword MUST be an array.
+    This array SHOULD have at least one element.
+    Elements in the array SHOULD be unique.
+    Elements in the array might be of any type, including null.
+   */
+  def attemptReadEnum(p: Parameters): Option[Schema] =
+    (p.json \ "enum")
+      .asOpt[JsArray]
+      .map {
+        case jsArray @ JsArray(array) if array.nonEmpty =>
+          if (array.forall(_.isInstanceOf[JsString])) {
+            StringSchema(
+              name = p.name,
+              path = p.path,
+              common = p.common,
+              description = p.description,
+              mandatory = p.isMandatory,
+              enum = Some(array.map(_.as[String])))
+          } else if (array.forall(_.isInstanceOf[JsObject])) {
+            readOneOfSchema(p, jsArray, Seq.empty)
+          } else {
+            throw new IllegalStateException(
+              s"Invalid enum definition, expected an array of strings or objects, but got $jsArray.")
+          }
+
+        case other =>
+          throw new IllegalStateException(s"Invalid enum definition, expected a non-empty array, but got $other.")
       }
 
   def readStringSchema(p: Parameters): StringSchema = {

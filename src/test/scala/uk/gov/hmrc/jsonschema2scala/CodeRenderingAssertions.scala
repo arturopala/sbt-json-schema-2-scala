@@ -34,12 +34,12 @@ trait CodeRenderingAssertions extends CompilationAssertions {
     assertCanParseAndCompile(schemaString, packageName = "a.b.c", className = randomName)
 
   def assertCanParseAndCompile(schemaSource: SchemaSource)(implicit compiler: Compiler): Unit =
-    assertCanParseAndCompile(schemaSource, Map())
+    assertCanParseAndCompile(schemaSource)
 
-  def assertCanParseAndCompile(schemaSource: SchemaSource, references: Map[String, SchemaSource])(
+  def assertCanParseAndCompile(schemaSource: SchemaSource, references: Map[String, SchemaSource] = Map())(
     implicit compiler: Compiler): Unit = {
     val definition = SchemaReader.read(schemaSource.uri, schemaSource.name, schemaSource.json, references)
-    assertCanParseAndCompile(definition, packageName = "a.b.c", className = schemaSource.name)
+    assertCanParseAndCompile(definition, packageName = "a.b.c")
   }
 
   def assertCanParseAndCompile(schemaString: String, packageName: String, className: String)(
@@ -52,15 +52,14 @@ trait CodeRenderingAssertions extends CompilationAssertions {
     implicit compiler: Compiler): Unit = {
     val options = ScalaCodeGeneratorOptions(features = Set(), packageName = packageName)
     val definition = SchemaReader.read(className, schemaJson)
-    val code = ScalaCodeGenerator.generateCodeFrom(definition, options, "")
-    assertSuccessAndCompiles(packageName, className, code, ClassAssertion(s"$packageName.$className"))
+    val result = ScalaCodeGenerator.generateCodeFrom(definition, options, "")
+    assertSuccessAndCompiles(result)
   }
 
-  def assertCanParseAndCompile(schema: Schema, packageName: String, className: String)(
-    implicit compiler: Compiler): Unit = {
+  def assertCanParseAndCompile(schema: Schema, packageName: String)(implicit compiler: Compiler): Unit = {
     val options = ScalaCodeGeneratorOptions(features = Set(), packageName = packageName)
-    val code = ScalaCodeGenerator.generateCodeFrom(schema, options, "")
-    assertSuccessAndCompiles(packageName, className, code, ClassAssertion(s"$packageName.$className"))
+    val result = ScalaCodeGenerator.generateCodeFrom(schema, options, "")
+    assertSuccessAndCompiles(result)
   }
 
   def assertRenderingFails(schemaString: String): Unit = {
