@@ -166,7 +166,7 @@ object SchemaReader {
             ObjectSchema(p.name, p.path, p.common, p.description, p.isMandatory, Seq.empty, Seq.empty)
           case "null" => NullSchema(p.name, p.path, p.common, p.description)
           case "array" =>
-            throw new IllegalStateException(s"Unspecified 'array' type not supported yet!")
+            ArraySchema(p.name, p.path, p.common, p.description, p.isMandatory)
           case other =>
             throw new IllegalStateException(
               s"Invalid type name, expected one of [null, boolean, object, array, number, integer, string], but got $other")
@@ -525,17 +525,30 @@ object SchemaReader {
 
   def readArraySchema(p: Parameters): ArraySchema = {
 
-    val items = (p.json \ "items").as[JsObject]
     val minItems = (p.json \ "minItems").asOpt[Int]
     val maxItems = (p.json \ "maxItems").asOpt[Int]
 
-    val itemDefinition =
-      readSchema(
-        NameUtils.singular(p.name),
-        "items" :: p.path,
-        items,
-        requiredFields = Seq(p.name),
-        currentReferenceResolver = p.referenceResolver)
+    /*
+      9.3.1.1. items
+      The value of "items" MUST be either a valid JSON Schema or an array of valid JSON Schemas.
+     */
+    val itemDefinition = (p.json \ "items")
+      .asOpt[JsValue]
+      .map({
+        case itemSchema: JsObject =>
+          readSchema(
+            NameUtils.singular(p.name),
+            "items" :: p.path,
+            itemSchema,
+            requiredFields = Seq(p.name),
+            currentReferenceResolver = p.referenceResolver)
+
+        case _: JsArray =>
+          throw new IllegalStateException("Unsupported feature, array with items of an array shape")
+
+        case other =>
+          throw new IllegalStateException(s"Invalid schema, expected object or an array, but got $other")
+      })
 
     ArraySchema(
       name = p.name,

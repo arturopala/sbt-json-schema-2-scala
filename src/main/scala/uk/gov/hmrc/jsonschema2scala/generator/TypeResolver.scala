@@ -23,6 +23,8 @@ import scala.annotation.tailrec
 
 trait TypeResolver {
 
+  def any: String
+
   def typeOf(
     schema: Schema,
     viewpoint: TypeDefinition,

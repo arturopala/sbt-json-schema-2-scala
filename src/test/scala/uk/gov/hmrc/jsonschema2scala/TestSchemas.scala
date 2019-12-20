@@ -30,9 +30,19 @@ trait TestSchemas {
     }
     .collect { case Some(x) => x }
 
+  lazy val verifiedTestSchemas: Seq[SchemaSource] = verifiedTestSchemaList
+    .map { filename =>
+      Try(classOf[SchemaReaderSpec].getResourceAsStream(f"/schemas/$filename")).map {
+        SchemaResource(_, filename)
+      }.toOption
+    }
+    .collect { case Some(x) => x }
+
   lazy val testReferences: Map[String, SchemaSource] = testSchemas.map(s => (s.uri.toString, s)).toMap
 
-  val testSchemaList = Seq(
+  lazy val verifiedTestReferences: Map[String, SchemaSource] = verifiedTestSchemas.map(s => (s.uri.toString, s)).toMap
+
+  val verifiedTestSchemaList = Seq(
     "E01.schema.json",
     "E02.schema.json",
     "E03.schema.json",
@@ -49,7 +59,10 @@ trait TestSchemas {
     "E14.schema.json",
     "E15.schema.json",
     "E16.schema.json",
-    "angular.schema.json",
+    "angular.schema.json"
+  )
+
+  val testSchemaList = Seq(
     "ansible-stable-2.0.json",
     "ansible-stable-2.1.json",
     "ansible-stable-2.2.json",

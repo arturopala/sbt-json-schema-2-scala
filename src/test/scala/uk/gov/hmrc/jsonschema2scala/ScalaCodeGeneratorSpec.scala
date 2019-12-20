@@ -33,6 +33,7 @@ package uk.gov.hmrc.jsonschema2scala
  */
 
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpec}
+import uk.gov.hmrc.jsonschema2scala.schema.SchemaSource
 
 class ScalaCodeGeneratorSpec
     extends WordSpec with Matchers with CodeRenderingAssertions with TestSchemas with BeforeAndAfterAll {
@@ -43,7 +44,7 @@ class ScalaCodeGeneratorSpec
     compiler.cleanup()
 
   "JsonSchema2ScalaCodeRenderer" should {
-    "fail rendering simple schema of primitive type" in
+    "fail generating from simple schema of primitive type" in
       assertRenderingFails("""
                              |{
                              |  "$id": "http://example.com/test.json",
@@ -52,7 +53,7 @@ class ScalaCodeGeneratorSpec
                              |}
                                """.stripMargin)
 
-    "render a simple schema into a case class without body and no companion object" in
+    "generate from simple schema into a case class without body and no companion object" in
       assertCanParseAndCompile("""
                                  |{
                                  |  "$id": "http://example.com/test.json",
@@ -73,7 +74,7 @@ class ScalaCodeGeneratorSpec
                                  |}
                              """.stripMargin)
 
-    "render a simple schema with cyclic self-reference" in
+    "generate from simple schema with cyclic self-reference" in
       assertCanParseAndCompile("""
                                  |{
                                  |  "$id": "http://example.com/test.json",
@@ -93,7 +94,7 @@ class ScalaCodeGeneratorSpec
                                  |}
                                """.stripMargin)
 
-    "render a schema having deeply nested objects" in
+    "generate from schema having deeply nested objects" in
       assertCanParseAndCompile("""
                                  |{
                                  |  "$id": "http://example.com/test.json",
@@ -154,7 +155,7 @@ class ScalaCodeGeneratorSpec
                                  |}
                                """.stripMargin)
 
-    "render a simple schema of an object having array of primitives" in
+    "generate from simple schema of an object having array of primitives" in
       assertCanParseAndCompile("""
                                  |{
                                  |  "$id": "http://example.com/test.json",
@@ -176,7 +177,7 @@ class ScalaCodeGeneratorSpec
                                  |}
                                """.stripMargin)
 
-    "render a simple schema of an object having array of objects" in
+    "generate from simple schema of an object having array of objects" in
       assertCanParseAndCompile("""
                                  |{
                                  |    "$id": "http://example.com/test.json",
@@ -207,7 +208,7 @@ class ScalaCodeGeneratorSpec
                                  |}
                                  |""".stripMargin)
 
-    "render a simple schema containing oneOf alternative primitive values" in
+    "generate from simple schema containing oneOf alternative primitive values" in
       assertCanParseAndCompile("""
                                  |{
                                  |  "$id": "http://example.com/test.json",
@@ -235,7 +236,7 @@ class ScalaCodeGeneratorSpec
                                  |}
                                """.stripMargin)
 
-    "render a simple object schema containing oneOf alternative object values" in
+    "generate from simple object schema containing oneOf alternative object values" in
       assertCanParseAndCompile("""
                                  |{
                                  |  "$id": "http://example.com/test.json",
@@ -279,7 +280,7 @@ class ScalaCodeGeneratorSpec
                                  |}
                                """.stripMargin)
 
-    "render a top level oneOf schema" in
+    "generate from top level oneOf schema" in
       assertCanParseAndCompile("""{
                                  |  "$id": "http://example.com/test.json",
                                  |  "description": "A test schema",
@@ -317,7 +318,7 @@ class ScalaCodeGeneratorSpec
                                  |  }
                                  |}""".stripMargin)
 
-    "render a simple schema containing oneOf alternative object and primitive values" in
+    "generate from simple schema containing oneOf alternative object and primitive values" in
       assertCanParseAndCompile("""
                                  |{
                                  |  "$id": "http://example.com/test.json",
@@ -350,7 +351,7 @@ class ScalaCodeGeneratorSpec
                                  |}
                                """.stripMargin)
 
-    "render a schema with internal references" in
+    "generate from schema with internal references" in
       assertCanParseAndCompile("""{
                                  |  "$id": "http://example.com/test.json",
                                  |  "description": "A test schema",
@@ -434,6 +435,10 @@ class ScalaCodeGeneratorSpec
                                  |    }
                                  |  }
                                  |}""".stripMargin)
+
+    verifiedTestSchemas.foreach { schema: SchemaSource =>
+      s"generate from ${schema.name}" in assertCanParseAndCompile(schema, verifiedTestReferences)
+    }
   }
 
 }

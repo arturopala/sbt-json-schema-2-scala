@@ -28,8 +28,8 @@ object SchemaUtils {
         s.patternProperties.flatMap(listSchemaUriToSchema)
       case s: OneOfSchema =>
         s.variants.flatMap(listSchemaUriToSchema)
-      case s: ArraySchema => listSchemaUriToSchema(s.item)
-      case _              => Seq.empty
+      case arraySchema: ArraySchema => arraySchema.item.map(listSchemaUriToSchema).getOrElse(Seq.empty)
+      case _                        => Seq.empty
     })
 
   def copy(schema: Schema, name: String, path: List[String], description: Option[String]): Schema = schema match {

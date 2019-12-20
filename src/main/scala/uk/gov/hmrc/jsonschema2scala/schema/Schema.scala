@@ -130,7 +130,7 @@ case class BooleanSchema(
   path: List[String],
   common: SchemaCommon,
   description: Option[String] = None,
-  mandatory: Boolean)
+  mandatory: Boolean = false)
     extends Schema {
   override val isBoolean: Boolean = true
   override def validate: Boolean = false
@@ -147,13 +147,13 @@ case class ArraySchema(
   path: List[String],
   common: SchemaCommon,
   description: Option[String] = None,
-  mandatory: Boolean,
-  item: Schema,
+  mandatory: Boolean = false,
+  item: Option[Schema] = None,
   minItems: Option[Int] = None,
   maxItems: Option[Int] = None)
     extends Schema {
   override val isPrimitive: Boolean = false
-  override def validate: Boolean = item.validate || minItems.isDefined || maxItems.isDefined
+  override def validate: Boolean = item.exists(_.validate) || minItems.isDefined || maxItems.isDefined
 }
 
 case class InternalSchemaReference(

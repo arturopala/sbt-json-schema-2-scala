@@ -92,7 +92,7 @@ object ScalaCodeGeneratorContext {
         case oneOfSchema: OneOfSchema =>
           oneOfSchema.variants.flatMap(mapCommonVals)
         case arraySchema: ArraySchema =>
-          mapCommonVals(arraySchema.item)
+          arraySchema.item.map(mapCommonVals).getOrElse(Seq.empty)
         case _ => Seq.empty
       })
 

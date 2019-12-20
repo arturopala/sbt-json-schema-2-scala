@@ -24,6 +24,8 @@ class ScalaTypeResolver(
   schemaUriToTypeInterfaces: Map[String, Seq[List[String]]])(implicit schemaNameResolver: TypeNameProvider)
     extends TypeResolver {
 
+  override val any: String = "Any"
+
   override def typeOf(
     schema: Schema,
     viewpoint: TypeDefinition,
@@ -36,17 +38,19 @@ class ScalaTypeResolver(
       case _: NumberSchema  => "BigDecimal"
       case _: IntegerSchema => "Int"
       case _: BooleanSchema => "Boolean"
-      case _: NullSchema    => "Any"
+      case _: NullSchema    => any
 
       case objectSchema: ObjectSchema => schemaTypeNameAsSeenFrom(objectSchema, viewpoint)
 
       case mapSchema: MapSchema =>
         if (mapSchema.patternProperties.size == 1)
           s"Map[String,${typeOf(mapSchema.patternProperties.head, viewpoint, wrapAsOption = false, showDefaultValue = false)}]"
-        else "Map[String,Any]"
+        else s"Map[String,$any]"
 
       case arraySchema: ArraySchema =>
-        s"Seq[${typeOf(arraySchema.item, viewpoint, wrapAsOption = false, showDefaultValue = false)}]"
+        arraySchema.item
+          .map(item => s"Seq[${typeOf(item, viewpoint, wrapAsOption = false, showDefaultValue = false)}]")
+          .getOrElse(s"Seq[$any]")
 
       case oneOfSchema: OneOfSchema =>
         if (oneOfSchema.variants.isEmpty) "Nothing"
