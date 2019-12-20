@@ -73,18 +73,21 @@ object CachingReferenceResolver {
 
     override def lookup(reference: String, reader: SchemaReader): Option[Schema] = {
 
+      val isFragment: Boolean = reference.startsWith("#")
+
       val uri: URI = URI.create(reference)
 
-      val (absolute, relative, isRelative) = if (uri.isAbsolute) {
-        (uri.toString, rootUri.relativize(uri).toString, false)
+      val (absolute, relative) = if (uri.isAbsolute) {
+        (uri.toString, rootUri.relativize(uri).toString)
       } else {
-        (rootUri.resolve(reference).toString, reference, true)
+        val a = rootUri.resolve(uri)
+        (a.toString, a.relativize(uri).toString)
       }
 
       cache
         .get(absolute)
         .orElse {
-          if (isRelative || absolute.startsWith(rootUriString)) {
+          if (isFragment || absolute.startsWith(rootUriString)) {
 
             val jsonPointer: List[String] = relative
               .split("/")
@@ -114,7 +117,7 @@ object CachingReferenceResolver {
           } else None
         }
         .orElse {
-          if (isRelative) None else upstreamResolver.flatMap(_.lookup(reference, reader))
+          if (isFragment) None else upstreamResolver.flatMap(_.lookup(reference, reader))
         }
     }
 

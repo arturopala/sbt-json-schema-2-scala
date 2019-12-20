@@ -58,7 +58,7 @@ case class SchemaFile(file: File) extends SchemaSource {
     }
   }
 
-  override def defaultURI: URI = URI.create(s"schema://$name")
+  override def defaultURI: URI = URI.create(name)
 }
 
 case class SchemaResource(inputStream: InputStream, name: String) extends SchemaSource {
@@ -73,6 +73,6 @@ case class SchemaResource(inputStream: InputStream, name: String) extends Schema
     }
   }
 
-  override def defaultURI: URI = URI.create(s"schema://$name")
+  override def defaultURI: URI = URI.create(name)
 
 }

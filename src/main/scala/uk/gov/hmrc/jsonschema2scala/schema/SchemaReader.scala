@@ -25,12 +25,12 @@ import scala.util.Try
 object SchemaReader {
 
   def read(name: String, json: JsObject): Schema = {
-    val uri = attemptReadId(json).getOrElse(URI.create(s"schema://$name"))
+    val uri = attemptReadId(json).getOrElse(URI.create(name))
     read(uri, name, json, None)
   }
 
   def read(name: String, json: JsObject, otherSchemas: Seq[SchemaSource]): Schema = {
-    val uri = attemptReadId(json).getOrElse(URI.create(s"schema://$name"))
+    val uri = attemptReadId(json).getOrElse(URI.create(name))
     read(uri, name, json, Some(MultiSourceReferenceResolver(otherSchemas)))
   }
 
