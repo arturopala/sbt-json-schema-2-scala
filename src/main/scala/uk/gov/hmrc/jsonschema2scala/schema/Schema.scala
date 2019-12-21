@@ -35,6 +35,15 @@ sealed trait Schema {
 
 case class SchemaCommon(definitions: Seq[Schema] = Seq.empty)
 
+case class SchemaAttributes(
+  name: String,
+  path: List[String],
+  description: Option[String],
+  definitions: Seq[Schema] = Seq.empty,
+  mandatory: Boolean,
+  validate: Boolean
+)
+
 case class ObjectSchema(
   name: String,
   path: List[String],

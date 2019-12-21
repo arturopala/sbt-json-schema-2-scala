@@ -16,6 +16,8 @@
 
 package uk.gov.hmrc.jsonschema2scala.schema
 
+import play.api.libs.json.JsValue
+
 object SchemaUtils {
 
   def listSchemaUriToSchema(schema: Schema): Seq[(String, Schema)] =

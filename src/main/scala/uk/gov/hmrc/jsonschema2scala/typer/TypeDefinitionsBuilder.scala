@@ -172,8 +172,8 @@ object TypeDefinitionsBuilder {
                 processExternalSchemaReference(subtypeNameVariant, name :: path, schema)
             }
           }
-        // New interface type to span over multiple oneOf variants
-        //val isRef = oneOf.isRef || subtypes.exists(_.schema.isRef)
+
+        // New umbrella trait
         val superType = TypeDefinition(
           oneOfTypeName,
           path,

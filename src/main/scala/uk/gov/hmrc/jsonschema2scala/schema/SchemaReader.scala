@@ -18,7 +18,8 @@ package uk.gov.hmrc.jsonschema2scala.schema
 
 import java.net.URI
 
-import play.api.libs.json.{JsArray, JsObject, JsString, JsValue}
+import play.api.libs.json.{JsArray, JsNumber, JsObject, JsString, JsValue}
+import uk.gov.hmrc.jsonschema2scala.schema.SchemaVocabulary.{arrayCoreVocabulary, arrayValidationVocabulary, keywordsIn, numberValidationVocabulary, objectCoreVocabulary, objectValidationVocabulary, stringValidationVocabulary, vocabulary, vocabularyWithoutMeta}
 
 import scala.util.Try
 
@@ -83,15 +84,18 @@ object SchemaReader {
 
     val p = Parameters(name, path, common, json, description, isMandatory, requiredFields, referenceResolver)
 
-    attemptReadByType(p)
+    attemptReadExplicitType(p)
       .orElse { attemptReadReference(p) }
       .orElse { attemptReadOneOf(p) }
-      .orElse { attemptReadObjectIfProperties(p) }
-      .orElse { attemptReadConstant(p) }
-      .orElse { attemptReadEnum(p) }
+      .orElse { attemptReadImplicitType(p) }
       .getOrElse {
-        // fallback to read object schema with implicit properties
-        readObjectSchema(p.copy(json = JsObject(Seq("properties" -> json))))
+        val ks = keywordsIn(vocabularyWithoutMeta)(json.fields)
+        if (ks.nonEmpty) {
+          throw new IllegalStateException(s"Unsupported schema feature(s): ${ks.mkString("|")}.")
+        } else {
+          // fallback to read implicit object schema
+          readObjectSchema(p.copy(json = JsObject(Seq("properties" -> json))))
+        }
       }
   }
 
@@ -100,18 +104,6 @@ object SchemaReader {
       .asOpt[String]
       .flatMap(s => Try(URI.create(s)).toOption)
       .map(_.normalize())
-
-  def decideResolverAndPath(
-    name: String,
-    path: List[String],
-    json: JsObject,
-    referenceResolver: SchemaReferenceResolver,
-    id: Option[URI]): (SchemaReferenceResolver, List[String]) =
-    id.map { uri =>
-        val uri2 = if (uri.isAbsolute) uri else referenceResolver.resolveUri(uri)
-        (CachingReferenceResolver(uri2, name, json, Some(referenceResolver)), SchemaReferenceResolver.rootPath(uri))
-      }
-      .getOrElse((referenceResolver, path))
 
   def attemptReadDescription(json: JsObject): Option[String] =
     (json \ "description").asOpt[String]
@@ -124,7 +116,7 @@ object SchemaReader {
     ("null", "boolean", "object", "array", "number", or "string"),
     or "integer" which matches any number with a zero fractional part.
    */
-  def attemptReadByType(p: Parameters): Option[Schema] =
+  def attemptReadExplicitType(p: Parameters): Option[Schema] =
     (p.json \ "type")
       .asOpt[JsValue]
       .map {
@@ -217,7 +209,7 @@ object SchemaReader {
             requiredFields = p.requiredFields)
 
       case None =>
-        throw new IllegalStateException(s"Invalid schema reference $reference")
+        throw new IllegalStateException(s"Cannot resolve schema reference $reference.")
     }
   }
 
@@ -252,162 +244,6 @@ object SchemaReader {
     )
   }
 
-  def attemptReadObjectIfProperties(p: Parameters): Option[Schema] =
-    (p.json \ "properties")
-      .asOpt[JsValue]
-      .map { _ =>
-        readObjectSchema(p)
-      }
-
-  /*
-    6.1.3. const
-    The value of this keyword MAY be of any type, including null.
-    Use of this keyword is functionally equivalent to an "enum" with a single value.
-   */
-  def attemptReadConstant(p: Parameters): Option[Schema] =
-    (p.json \ "const")
-      .asOpt[JsValue]
-      .map {
-        case JsString(value) =>
-          StringSchema(
-            name = p.name,
-            path = p.path,
-            common = p.common,
-            description = p.description,
-            mandatory = p.isMandatory,
-            enum = Some(Seq(value)))
-
-        case json: JsObject =>
-          readObjectSchema(p.copy(json = json))
-
-        case other =>
-          throw new IllegalStateException(
-            s"Unsupported const definition, expected a string or an object, but got $other.")
-      }
-
-  /*
-    6.1.2. enum
-    The value of this keyword MUST be an array.
-    This array SHOULD have at least one element.
-    Elements in the array SHOULD be unique.
-    Elements in the array might be of any type, including null.
-   */
-  def attemptReadEnum(p: Parameters): Option[Schema] =
-    (p.json \ "enum")
-      .asOpt[JsArray]
-      .flatMap {
-        case jsArray @ JsArray(array) if array.nonEmpty =>
-          if (array.forall(_.isInstanceOf[JsString])) {
-            Some(
-              StringSchema(
-                name = p.name,
-                path = p.path,
-                common = p.common,
-                description = p.description,
-                mandatory = p.isMandatory,
-                enum = Some(array.map(_.as[String]))))
-          } else if (array.forall(_.isInstanceOf[JsObject])) {
-            Some(readOneOfSchema(p, jsArray, Seq.empty))
-          } else if (array.forall(_.isInstanceOf[JsArray])) {
-            array.length match {
-              case 1 =>
-                array.head match {
-                  case json: JsObject =>
-                    Some(readSchema(p.name, p.path, json, p.description, p.requiredFields, p.referenceResolver))
-
-                  case array: JsArray =>
-                    Some(
-                      ArraySchema(
-                        p.name,
-                        p.path,
-                        p.common,
-                        p.description,
-                        p.isMandatory,
-                        None,
-                        Some(0),
-                        Some(array.value.length)))
-
-                  case other =>
-                    throw new IllegalStateException(s"Invalid enum array element, expected an object, but got $other.")
-                }
-              case other =>
-                throw new IllegalStateException(s"Unsupported schema, multi-array enum: $other.")
-            }
-          } else {
-            throw new IllegalStateException(
-              s"Unsupported enum definition, expected an array of strings or objects, but got $jsArray.")
-          }
-
-        case other =>
-          throw new IllegalStateException(s"Invalid enum definition, expected a non-empty array, but got $other.")
-      }
-
-  def readStringSchema(p: Parameters): StringSchema = {
-
-    val pattern = (p.json \ "pattern").asOpt[String]
-    val enum = (p.json \ "enum").asOpt[Seq[String]]
-    val minLength = (p.json \ "minLength").asOpt[Int]
-    val maxLength = (p.json \ "maxLength").asOpt[Int]
-    val isUniqueKey = (p.json \ "x_uniqueKey").asOpt[Boolean].getOrElse(false)
-    val isKey = (p.json \ "x_key").asOpt[Boolean].getOrElse(false)
-    val customGenerator = (p.json \ "x_gen").asOpt[String]
-
-    StringSchema(
-      name = p.name,
-      path = p.path,
-      common = p.common,
-      description = p.description,
-      mandatory = p.isMandatory,
-      pattern = pattern,
-      enum = enum,
-      minLength = minLength,
-      maxLength = maxLength,
-      isUniqueKey = isUniqueKey,
-      isKey = isKey,
-      customGenerator = customGenerator
-    )
-  }
-
-  def readNumberSchema(p: Parameters): NumberSchema = {
-
-    val minimum = (p.json \ "minimum").asOpt[BigDecimal]
-    val maximum = (p.json \ "maximum").asOpt[BigDecimal]
-    val multipleOf = (p.json \ "multipleOf").asOpt[BigDecimal]
-    val customGenerator = (p.json \ "x_gen").asOpt[String]
-
-    NumberSchema(
-      name = p.name,
-      path = p.path,
-      common = p.common,
-      description = p.description,
-      mandatory = p.isMandatory,
-      customGenerator = customGenerator,
-      minimum = minimum,
-      maximum = maximum,
-      multipleOf = multipleOf
-    )
-  }
-
-  def readIntegerSchema(p: Parameters): IntegerSchema = {
-
-    val minimum = (p.json \ "minimum").asOpt[Int]
-    val maximum = (p.json \ "maximum").asOpt[Int]
-    val multipleOf = (p.json \ "multipleOf").asOpt[Int]
-    val customGenerator = (p.json \ "x_gen").asOpt[String]
-
-    IntegerSchema(
-      name = p.name,
-      path = p.path,
-      common = p.common,
-      description = p.description,
-      mandatory = p.isMandatory,
-      customGenerator = customGenerator,
-      minimum = minimum,
-      maximum = maximum,
-      multipleOf = multipleOf
-    )
-  }
-
   def readObjectSchema(p: Parameters): Schema = {
 
     val (required, alternatives) = readRequired(p.json)
@@ -415,39 +251,17 @@ object SchemaReader {
 
     val propertiesOpt: Option[Seq[Schema]] =
       attemptReadProperties(p2)
+        .flatMap(emptyAsNone)
 
     val patternPropertiesOpt: Option[Seq[Schema]] =
       attemptReadPatternProperties(p2)
+        .flatMap(emptyAsNone)
 
     val additionalPropertiesOpt: Option[Seq[Schema]] =
       attemptReadAdditionalProperties(p2)
+        .flatMap(emptyAsNone)
 
     (propertiesOpt, patternPropertiesOpt, additionalPropertiesOpt) match {
-      case (Some(properties), _, _) =>
-        ObjectSchema(
-          name = p2.name,
-          path = p2.path,
-          common = p2.common,
-          description = p2.description,
-          mandatory = p2.isMandatory,
-          properties = properties ++ additionalPropertiesOpt.getOrElse(Seq.empty),
-          requiredFields = required,
-          alternativeRequiredFields = alternatives,
-          patternProperties = patternPropertiesOpt
-        )
-
-      case (None, _, Some(additionalProperties)) =>
-        ObjectSchema(
-          name = p2.name,
-          path = p2.path,
-          common = p2.common,
-          description = p2.description,
-          mandatory = p2.isMandatory,
-          properties = additionalProperties,
-          requiredFields = required,
-          alternativeRequiredFields = alternatives,
-          patternProperties = patternPropertiesOpt
-        )
 
       case (None, Some(patternProperties), None) =>
         MapSchema(
@@ -461,20 +275,20 @@ object SchemaReader {
           alternativeRequiredFields = alternatives
         )
 
-      case (None, None, _) =>
-        attemptReadOneOf(p2, alternatives)
-          .getOrElse(
-            ObjectSchema(
-              name = p2.name,
-              path = p2.path,
-              common = p2.common,
-              description = p2.description,
-              mandatory = p2.isMandatory,
-              properties = additionalPropertiesOpt.getOrElse(Seq.empty),
-              requiredFields = required,
-              alternativeRequiredFields = alternatives,
-              patternProperties = None
-            ))
+      case _ =>
+        ObjectSchema(
+          name = p2.name,
+          path = p2.path,
+          common = p2.common,
+          description = p2.description,
+          mandatory = p2.isMandatory,
+          properties =
+            propertiesOpt.getOrElse(Seq.empty) ++
+              additionalPropertiesOpt.getOrElse(Seq.empty),
+          requiredFields = required,
+          alternativeRequiredFields = alternatives,
+          patternProperties = patternPropertiesOpt
+        )
     }
   }
 
@@ -531,17 +345,18 @@ object SchemaReader {
     (p.json \ "additionalProperties")
       .asOpt[JsValue] match {
       case Some(property: JsObject) =>
-        val definition = readSchema(
-          name = p.name,
-          currentPath = "additionalProperties" :: p.path,
-          json = property,
-          requiredFields = p.requiredFields,
-          currentReferenceResolver = p.referenceResolver)
-        definition match {
-          case o: ObjectSchema => Some(o.properties)
-          case m: MapSchema    => Some(m.patternProperties)
-          case other           => Some(Seq(other))
-        }
+        Some(
+          readSchema(
+            name = p.name,
+            currentPath = "additionalProperties" :: p.path,
+            json = property,
+            requiredFields = p.requiredFields,
+            currentReferenceResolver = p.referenceResolver))
+          .map {
+            case o: ObjectSchema => o.properties
+            case m: MapSchema    => m.patternProperties
+            case other           => Seq(other)
+          }
 
       case _ => None
     }
@@ -623,4 +438,127 @@ object SchemaReader {
           })
       )
       .getOrElse((Seq.empty, Seq.empty))
+
+  def readStringSchema(p: Parameters): StringSchema = {
+
+    val pattern = (p.json \ "pattern").asOpt[String]
+    val minLength = (p.json \ "minLength").asOpt[Int]
+    val maxLength = (p.json \ "maxLength").asOpt[Int]
+
+    val isUniqueKey = (p.json \ "x_uniqueKey").asOpt[Boolean].getOrElse(false)
+    val isKey = (p.json \ "x_key").asOpt[Boolean].getOrElse(false)
+    val customGenerator = (p.json \ "x_gen").asOpt[String]
+
+    val enum = (p.json \ "enum")
+      .asOpt[Seq[String]]
+      .orElse(
+        (p.json \ "const").asOpt[String].map(Seq(_))
+      )
+
+    StringSchema(
+      name = p.name,
+      path = p.path,
+      common = p.common,
+      description = p.description,
+      mandatory = p.isMandatory,
+      pattern = pattern,
+      enum = enum,
+      minLength = minLength,
+      maxLength = maxLength,
+      isUniqueKey = isUniqueKey,
+      isKey = isKey,
+      customGenerator = customGenerator
+    )
+  }
+
+  def readNumberSchema(p: Parameters): NumberSchema = {
+
+    val minimum = (p.json \ "minimum").asOpt[BigDecimal]
+    val maximum = (p.json \ "maximum").asOpt[BigDecimal]
+    val multipleOf = (p.json \ "multipleOf").asOpt[BigDecimal]
+
+    val customGenerator = (p.json \ "x_gen").asOpt[String]
+
+    NumberSchema(
+      name = p.name,
+      path = p.path,
+      common = p.common,
+      description = p.description,
+      mandatory = p.isMandatory,
+      customGenerator = customGenerator,
+      minimum = minimum,
+      maximum = maximum,
+      multipleOf = multipleOf
+    )
+  }
+
+  def readIntegerSchema(p: Parameters): IntegerSchema = {
+
+    val minimum = (p.json \ "minimum").asOpt[Int]
+    val maximum = (p.json \ "maximum").asOpt[Int]
+    val multipleOf = (p.json \ "multipleOf").asOpt[Int]
+
+    val customGenerator = (p.json \ "x_gen").asOpt[String]
+
+    IntegerSchema(
+      name = p.name,
+      path = p.path,
+      common = p.common,
+      description = p.description,
+      mandatory = p.isMandatory,
+      customGenerator = customGenerator,
+      minimum = minimum,
+      maximum = maximum,
+      multipleOf = multipleOf
+    )
+  }
+
+  final val implicitReaders: Seq[(Set[String], Parameters => Schema)] = Seq(
+    objectCoreVocabulary       -> readObjectSchema,
+    objectValidationVocabulary -> readObjectSchema,
+    stringValidationVocabulary -> readStringSchema,
+    numberValidationVocabulary -> readNumberSchema,
+    arrayCoreVocabulary        -> readArraySchema,
+    arrayValidationVocabulary  -> readArraySchema
+  )
+
+  def attemptReadImplicitType(p: Parameters): Option[Schema] = {
+    import SchemaVocabulary._
+
+    val fields: Seq[String] = p.json.fields.map(_._1)
+
+    implicitReaders
+      .foldLeft[Option[Schema]](None) {
+        case (a, (v, r)) => a.orElse(if (isKeywordIn(v)(fields)) Some(r(p)) else None)
+      }
+      .orElse {
+        (p.json \ "enum")
+          .asOpt[Seq[JsValue]]
+          .orElse(
+            (p.json \ "const").asOpt[JsValue].map(Seq(_))
+          )
+          .flatMap(emptyAsNone)
+          .map(enum =>
+            enum match {
+              case (_: JsString) :: _ => readStringSchema(p)
+              case (_: JsNumber) :: _ => NumberSchema(p.name, p.path, p.common, p.description, p.isMandatory)
+              case (_: JsArray) :: _  => ArraySchema(p.name, p.path, p.common, p.description, p.isMandatory, None)
+              case other              => throw new IllegalStateException(s"Unsupported feature, enum of $other")
+          })
+      }
+  }
+
+  def decideResolverAndPath(
+    name: String,
+    path: List[String],
+    json: JsObject,
+    referenceResolver: SchemaReferenceResolver,
+    id: Option[URI]): (SchemaReferenceResolver, List[String]) =
+    id.map { uri =>
+        val uri2 = if (uri.isAbsolute) uri else referenceResolver.resolveUri(uri)
+        (CachingReferenceResolver(uri2, name, json, Some(referenceResolver)), SchemaReferenceResolver.rootPath(uri))
+      }
+      .getOrElse((referenceResolver, path))
+
+  def emptyAsNone[T](seq: Seq[T]): Option[Seq[T]] = if (seq.isEmpty) None else Some(seq)
 }
