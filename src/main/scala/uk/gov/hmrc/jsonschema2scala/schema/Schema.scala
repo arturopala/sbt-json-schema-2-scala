@@ -16,12 +16,24 @@
 
 package uk.gov.hmrc.jsonschema2scala.schema
 
+import play.api.libs.json.{JsValue, Reads}
+
 sealed trait Schema {
 
   final def name: String = attributes.name
   final def path: List[String] = attributes.path
   final def description: Option[String] = attributes.description
   final def definitions: Seq[Schema] = attributes.definitions
+
+  final def custom[T: Reads](key: String): Option[T] =
+    for {
+      map    <- attributes.custom
+      value  <- map.get(key)
+      result <- value.asOpt[T]
+    } yield result
+
+  final def hasCustom(key: String): Boolean =
+    attributes.custom.exists(_.contains(key))
 
   val attributes: SchemaAttributes
 
@@ -34,14 +46,13 @@ sealed trait Schema {
   val uri: String = SchemaReferenceResolver.pathToUri(path)
 }
 
-case class SchemaCommon(definitions: Seq[Schema] = Seq.empty)
-
 case class SchemaAttributes(
   name: String,
   path: List[String],
   description: Option[String],
   definitions: Seq[Schema] = Seq.empty,
-  required: Boolean
+  required: Boolean,
+  custom: Option[Map[String, JsValue]]
 )
 
 case class ObjectSchema(
@@ -86,10 +97,7 @@ case class StringSchema(
   pattern: Option[String] = None,
   enum: Option[Seq[String]] = None,
   minLength: Option[Int] = None,
-  maxLength: Option[Int] = None,
-  isUniqueKey: Boolean = false,
-  isKey: Boolean = false,
-  customGenerator: Option[String] = None)
+  maxLength: Option[Int] = None)
     extends Schema {
 
   override val primitive: Boolean = true
@@ -99,9 +107,10 @@ case class StringSchema(
 
 case class NumberSchema(
   attributes: SchemaAttributes,
-  customGenerator: Option[String] = None,
   minimum: Option[BigDecimal] = None,
   maximum: Option[BigDecimal] = None,
+  exclusiveMinimum: Option[BigDecimal] = None,
+  exclusiveMaximum: Option[BigDecimal] = None,
   multipleOf: Option[BigDecimal] = None
 ) extends Schema {
 
@@ -111,9 +120,10 @@ case class NumberSchema(
 
 case class IntegerSchema(
   attributes: SchemaAttributes,
-  customGenerator: Option[String] = None,
   minimum: Option[Int] = None,
   maximum: Option[Int] = None,
+  exclusiveMinimum: Option[Int] = None,
+  exclusiveMaximum: Option[Int] = None,
   multipleOf: Option[Int] = None
 ) extends Schema {
 
@@ -138,7 +148,10 @@ case class ArraySchema(
   attributes: SchemaAttributes,
   item: Option[Schema] = None,
   minItems: Option[Int] = None,
-  maxItems: Option[Int] = None)
+  maxItems: Option[Int] = None,
+  uniqueItems: Option[Boolean] = None,
+  minContains: Option[Int] = None,
+  maxContains: Option[Int] = None)
     extends Schema {
 
   override val primitive: Boolean = false

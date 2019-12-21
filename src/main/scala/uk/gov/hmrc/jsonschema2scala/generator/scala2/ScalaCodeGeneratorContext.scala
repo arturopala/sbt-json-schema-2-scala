@@ -38,7 +38,7 @@ object ScalaCodeGeneratorContext {
 
   private def findUniqueKey(schema: Schema, path: List[Schema] = Nil): Option[(String, String)] =
     (schema match {
-      case s: StringSchema => if (s.isUniqueKey) Some((accessorFor(s :: path), s.name)) else None
+      case s: StringSchema => if (s.hasCustom("x_uniqueKey")) Some((accessorFor(s :: path), s.name)) else None
       case o: ObjectSchema =>
         o.properties.foldLeft[Option[(String, String)]](None)((a, p) => a.orElse(findUniqueKey(p, o :: path)))
       case _ => None
@@ -47,7 +47,7 @@ object ScalaCodeGeneratorContext {
 
   private def findKeys(schema: Schema, path: List[Schema] = Nil): Seq[(String, String)] =
     (schema match {
-      case s: StringSchema => if (s.isKey) Seq((accessorFor(s :: path), s.name)) else Seq.empty
+      case s: StringSchema => if (s.hasCustom("x_key")) Seq((accessorFor(s :: path), s.name)) else Seq.empty
       case o: ObjectSchema =>
         o.properties.flatMap(findKeys(_, o :: path))
       case _ => Seq.empty

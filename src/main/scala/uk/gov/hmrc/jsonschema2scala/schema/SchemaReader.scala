@@ -55,13 +55,20 @@ object SchemaReader {
     description: Option[String],
     definitions: Seq[Schema],
     required: Boolean,
+    custom: Option[Map[String, JsValue]],
     json: JsObject,
     requiredFields: Seq[String],
     referenceResolver: SchemaReferenceResolver) {
 
     val a: SchemaAttributes =
-      SchemaAttributes(name, path, description, definitions, required)
+      SchemaAttributes(name, path, description, definitions, required, custom)
   }
+
+  val keywordsNotInVocabulary: Seq[(String, JsValue)] => Set[String] =
+    Vocabulary.keywordsNotIn(Vocabulary.allKeywords)
+
+  val keywordsInVocabularyNotMeta: Seq[(String, JsValue)] => Set[String] =
+    Vocabulary.keywordsIn(Vocabulary.allKeywordsButMeta)
 
   def readSchema(
     name: String,
@@ -89,14 +96,20 @@ object SchemaReader {
       referenceResolver) ++
       readDefinitions(Keywords.`$defs`, name, path, json, description, referenceResolver)
 
-    val p = Parameters(name, path, description, definitions, isMandatory, json, requiredFields, referenceResolver)
+    val custom: Option[Map[String, JsValue]] = {
+      val set = keywordsNotInVocabulary(json.fields)
+      if (set.isEmpty) None else Some(set.map(k => (k, (json \ k).as[JsValue])).toMap)
+    }
+
+    val p =
+      Parameters(name, path, description, definitions, isMandatory, custom, json, requiredFields, referenceResolver)
 
     attemptReadExplicitType(p)
       .orElse { attemptReadReference(p) }
       .orElse { attemptReadOneOf(p) }
       .orElse { attemptReadImplicitType(p) }
       .getOrElse {
-        val ks = Vocabulary.keywordsIn(Vocabulary.allKeywordsButMeta)(json.fields)
+        val ks = keywordsInVocabularyNotMeta(json.fields)
         if (ks.nonEmpty) {
           throw new IllegalStateException(s"Unsupported schema feature(s): ${ks.mkString("|")}.")
         } else {
@@ -334,6 +347,9 @@ object SchemaReader {
 
     val minItems = (p.json \ "minItems").asOpt[Int]
     val maxItems = (p.json \ "maxItems").asOpt[Int]
+    val uniqueItems = (p.json \ "uniqueItems").asOpt[Boolean]
+    val minContains = (p.json \ "minContains").asOpt[Int]
+    val maxContains = (p.json \ "maxContains").asOpt[Int]
 
     /*
       9.3.1.1. items
@@ -357,7 +373,7 @@ object SchemaReader {
           throw new IllegalStateException(s"Invalid schema, expected object or an array, but got $other")
       })
 
-    ArraySchema(p.a, itemDefinition, minItems, maxItems)
+    ArraySchema(p.a, itemDefinition, minItems, maxItems, uniqueItems, minContains, maxContains)
   }
 
   def readDefinitions(
@@ -406,58 +422,35 @@ object SchemaReader {
     val minLength = (p.json \ "minLength").asOpt[Int]
     val maxLength = (p.json \ "maxLength").asOpt[Int]
 
-    val isUniqueKey = (p.json \ "x_uniqueKey").asOpt[Boolean].getOrElse(false)
-    val isKey = (p.json \ "x_key").asOpt[Boolean].getOrElse(false)
-    val customGenerator = (p.json \ "x_gen").asOpt[String]
-
     val enum = (p.json \ "enum")
       .asOpt[Seq[String]]
       .orElse(
         (p.json \ "const").asOpt[String].map(Seq(_))
       )
 
-    StringSchema(
-      attributes = p.a,
-      pattern = pattern,
-      enum = enum,
-      minLength = minLength,
-      maxLength = maxLength,
-      isUniqueKey = isUniqueKey,
-      isKey = isKey,
-      customGenerator = customGenerator)
+    StringSchema(p.a, pattern, enum, minLength, maxLength)
   }
 
   def readNumberSchema(p: Parameters): NumberSchema = {
 
     val minimum = (p.json \ "minimum").asOpt[BigDecimal]
     val maximum = (p.json \ "maximum").asOpt[BigDecimal]
+    val exclusiveMinimum = (p.json \ "exclusiveMinimum").asOpt[BigDecimal]
+    val exclusiveMaximum = (p.json \ "exclusiveMaximum").asOpt[BigDecimal]
     val multipleOf = (p.json \ "multipleOf").asOpt[BigDecimal]
 
-    val customGenerator = (p.json \ "x_gen").asOpt[String]
-
-    NumberSchema(
-      attributes = p.a,
-      customGenerator = customGenerator,
-      minimum = minimum,
-      maximum = maximum,
-      multipleOf = multipleOf)
+    NumberSchema(p.a, minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf)
   }
 
   def readIntegerSchema(p: Parameters): IntegerSchema = {
 
     val minimum = (p.json \ "minimum").asOpt[Int]
     val maximum = (p.json \ "maximum").asOpt[Int]
+    val exclusiveMinimum = (p.json \ "exclusiveMinimum").asOpt[Int]
+    val exclusiveMaximum = (p.json \ "exclusiveMaximum").asOpt[Int]
     val multipleOf = (p.json \ "multipleOf").asOpt[Int]
 
-    val customGenerator = (p.json \ "x_gen").asOpt[String]
-
-    IntegerSchema(
-      attributes = p.a,
-      customGenerator = customGenerator,
-      minimum = minimum,
-      maximum = maximum,
-      multipleOf = multipleOf
-    )
+    IntegerSchema(p.a, minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf)
   }
 
   final val implicitReaders: Seq[(Set[String], Parameters => Schema)] = Seq(

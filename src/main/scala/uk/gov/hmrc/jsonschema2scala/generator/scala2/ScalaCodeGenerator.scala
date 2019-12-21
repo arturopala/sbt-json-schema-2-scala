@@ -359,24 +359,35 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
       .orElse(knownFieldGenerators(pathLastPart(property)))
       .getOrElse(property match {
         case s: StringSchema =>
-          s.customGenerator.getOrElse(if (s.enum.isDefined) {
-            if (s.enum.get.size == 1)
-              s"""Gen.const("${s.enum.get.head}")"""
-            else
-              s"""Gen.oneOf(${context.commonReference(s"Seq(${s.enum.get.mkString("\"", "\",\"", "\"")})")})"""
-          } else if (s.pattern.isDefined)
-            s"""Generator.regex(${context.commonReference(quoted(s.pattern.get))})"""
-          else if (s.minLength.isDefined || s.maxLength.isDefined)
-            s"""Generator.stringMinMaxN(${s.minLength.getOrElse(1)},${s.maxLength.getOrElse(256)})"""
-          else "Generator.stringMaxN(256)")
+          s.custom[String]("x_gen")
+            .getOrElse(if (s.enum.isDefined) {
+              if (s.enum.get.size == 1)
+                s"""Gen.const("${s.enum.get.head}")"""
+              else
+                s"""Gen.oneOf(${context.commonReference(s"Seq(${s.enum.get.mkString("\"", "\",\"", "\"")})")})"""
+            } else if (s.pattern.isDefined)
+              s"""Generator.regex(${context.commonReference(quoted(s.pattern.get))})"""
+            else if (s.minLength.isDefined || s.maxLength.isDefined)
+              s"""Generator.stringMinMaxN(${s.minLength.getOrElse(1)},${s.maxLength.getOrElse(256)})"""
+            else "Generator.stringMaxN(256)")
 
         case n: NumberSchema =>
-          n.customGenerator.getOrElse((n.minimum, n.maximum, n.multipleOf) match {
-            case (Some(min), Some(max), mlt) => s"Generator.chooseBigDecimal($min,$max,$mlt)"
-            case (Some(min), None, mlt)      => s"Generator.chooseBigDecimal($min,100000000,$mlt)"
-            case (None, Some(max), mlt)      => s"Generator.chooseBigDecimal(0,$max,$mlt)"
-            case _                           => "Gen.const(BigDecimal(0))"
-          })
+          n.custom[String]("x_gen")
+            .getOrElse((n.minimum, n.maximum, n.multipleOf) match {
+              case (Some(min), Some(max), mlt) => s"Generator.chooseBigDecimal($min,$max,$mlt)"
+              case (Some(min), None, mlt)      => s"Generator.chooseBigDecimal($min,100000000,$mlt)"
+              case (None, Some(max), mlt)      => s"Generator.chooseBigDecimal(0,$max,$mlt)"
+              case _                           => "Gen.const(BigDecimal(0))"
+            })
+
+        case n: IntegerSchema =>
+          n.custom[String]("x_gen")
+            .getOrElse((n.minimum, n.maximum, n.multipleOf) match {
+              case (Some(min), Some(max), mlt) => s"Generator.chooseNum($min,$max,$mlt)"
+              case (Some(min), None, mlt)      => s"Generator.chooseNum($min,100000000,$mlt)"
+              case (None, Some(max), mlt)      => s"Generator.chooseNum(0,$max,$mlt)"
+              case _                           => "Gen.const(Int(0))"
+            })
 
         case b: BooleanSchema => "Generator.booleanGen"
         case a: ArraySchema =>

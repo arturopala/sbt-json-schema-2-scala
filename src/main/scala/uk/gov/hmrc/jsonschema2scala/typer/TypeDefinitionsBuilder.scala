@@ -52,7 +52,8 @@ object TypeDefinitionsBuilder {
                   name = schema.name,
                   path = schema.path,
                   description = schema.description,
-                  required = schema.required)),
+                  required = schema.required,
+                  custom = None)),
               nestedTypes = types
             ))
       }
@@ -183,7 +184,8 @@ object TypeDefinitionsBuilder {
               name = name,
               path = oneOfSchema.path,
               description = oneOfSchema.description,
-              required = oneOfSchema.required)),
+              required = oneOfSchema.required,
+              custom = None)),
           isInterface = true,
           subtypes = subtypes
         )

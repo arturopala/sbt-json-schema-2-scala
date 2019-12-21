@@ -6,8 +6,11 @@ object Vocabulary {
 
   import Keywords._
 
-  def keywordsIn(v: Set[String])(fields: Seq[(String, JsValue)]): List[String] =
-    fields.foldLeft(List.empty[String])((l, f) => if (v.contains(f._1)) f._1 :: l else l)
+  def keywordsIn(v: Set[String])(fields: Seq[(String, JsValue)]): Set[String] =
+    fields.map(_._1).toSet.intersect(v)
+
+  def keywordsNotIn(v: Set[String])(fields: Seq[(String, JsValue)]): Set[String] =
+    fields.map(_._1).toSet.diff(v)
 
   def isKeywordIn(v: Set[String])(fields: Seq[String]): Boolean =
     fields.foldLeft(false)((b, f) => b || v.contains(f))
