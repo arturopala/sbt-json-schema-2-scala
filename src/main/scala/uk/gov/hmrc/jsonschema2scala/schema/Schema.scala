@@ -18,17 +18,18 @@ package uk.gov.hmrc.jsonschema2scala.schema
 
 sealed trait Schema {
 
-  val name: String
-  val path: List[String]
-  val description: Option[String]
+  final def name: String = attributes.name
+  final def path: List[String] = attributes.path
+  final def description: Option[String] = attributes.description
+  final def definitions: Seq[Schema] = attributes.definitions
 
-  val common: SchemaCommon
+  val attributes: SchemaAttributes
 
-  def mandatory: Boolean
-  def validate: Boolean
+  val primitive: Boolean
+  val validated: Boolean
 
-  val isPrimitive: Boolean = true
-  val isBoolean: Boolean = false
+  val boolean: Boolean = false
+  def required: Boolean = attributes.required
 
   val uri: String = SchemaReferenceResolver.pathToUri(path)
 }
@@ -40,60 +41,48 @@ case class SchemaAttributes(
   path: List[String],
   description: Option[String],
   definitions: Seq[Schema] = Seq.empty,
-  mandatory: Boolean,
-  validate: Boolean
+  required: Boolean
 )
 
 case class ObjectSchema(
-  name: String,
-  path: List[String],
-  common: SchemaCommon = SchemaCommon(),
-  description: Option[String] = None,
-  mandatory: Boolean = false,
+  attributes: SchemaAttributes,
   properties: Seq[Schema] = Seq.empty,
   requiredFields: Seq[String] = Seq.empty,
   alternativeRequiredFields: Seq[Set[String]] = Seq.empty,
   patternProperties: Option[Seq[Schema]] = None)
     extends Schema {
-  override val isPrimitive: Boolean = false
-  override def validate: Boolean = true
+
+  final val primitive: Boolean = false
+  final val validated: Boolean = true
+
   def isEmpty: Boolean = properties.isEmpty && patternProperties.isEmpty
 }
 
 case class MapSchema(
-  name: String,
-  path: List[String],
-  common: SchemaCommon = SchemaCommon(),
-  description: Option[String] = None,
-  mandatory: Boolean = false,
+  attributes: SchemaAttributes,
   patternProperties: Seq[Schema] = Seq.empty,
   requiredFields: Seq[String] = Seq.empty,
   alternativeRequiredFields: Seq[Set[String]] = Seq.empty)
     extends Schema {
-  override val isPrimitive: Boolean = false
-  override def validate: Boolean = true
+
+  override val primitive: Boolean = false
+  override val validated: Boolean = true
+
   def isEmpty: Boolean = patternProperties.isEmpty
 }
 
 case class OneOfSchema(
-  name: String,
-  path: List[String],
-  common: SchemaCommon = SchemaCommon(),
-  description: Option[String] = None,
-  mandatory: Boolean = false,
+  attributes: SchemaAttributes,
   variants: Seq[Schema] = Seq.empty,
   alternativeRequiredFields: Seq[Set[String]] = Seq.empty)
     extends Schema {
-  override def validate: Boolean = variants.nonEmpty
-  override val isPrimitive: Boolean = variants.forall(_.isPrimitive)
+
+  override val primitive: Boolean = variants.forall(_.primitive)
+  override val validated: Boolean = variants.nonEmpty
 }
 
 case class StringSchema(
-  name: String,
-  path: List[String],
-  common: SchemaCommon = SchemaCommon(),
-  description: Option[String] = None,
-  mandatory: Boolean = false,
+  attributes: SchemaAttributes,
   pattern: Option[String] = None,
   enum: Option[Seq[String]] = None,
   minLength: Option[Int] = None,
@@ -102,108 +91,93 @@ case class StringSchema(
   isKey: Boolean = false,
   customGenerator: Option[String] = None)
     extends Schema {
-  override def validate: Boolean =
+
+  override val primitive: Boolean = true
+  override val validated: Boolean =
     enum.isDefined || pattern.isDefined || minLength.isDefined || maxLength.isDefined
 }
 
 case class NumberSchema(
-  name: String,
-  path: List[String],
-  common: SchemaCommon = SchemaCommon(),
-  description: Option[String] = None,
-  mandatory: Boolean = false,
+  attributes: SchemaAttributes,
   customGenerator: Option[String] = None,
   minimum: Option[BigDecimal] = None,
   maximum: Option[BigDecimal] = None,
   multipleOf: Option[BigDecimal] = None
 ) extends Schema {
-  override def validate: Boolean = minimum.isDefined || maximum.isDefined || multipleOf.isDefined
+
+  override val primitive: Boolean = true
+  override val validated: Boolean = minimum.isDefined || maximum.isDefined || multipleOf.isDefined
 }
 
 case class IntegerSchema(
-  name: String,
-  path: List[String],
-  common: SchemaCommon = SchemaCommon(),
-  description: Option[String] = None,
-  mandatory: Boolean = false,
+  attributes: SchemaAttributes,
   customGenerator: Option[String] = None,
   minimum: Option[Int] = None,
   maximum: Option[Int] = None,
   multipleOf: Option[Int] = None
 ) extends Schema {
-  override def validate: Boolean = minimum.isDefined || maximum.isDefined || multipleOf.isDefined
+
+  override val primitive: Boolean = true
+  override val validated: Boolean = minimum.isDefined || maximum.isDefined || multipleOf.isDefined
 }
 
-case class BooleanSchema(
-  name: String,
-  path: List[String],
-  common: SchemaCommon,
-  description: Option[String] = None,
-  mandatory: Boolean = false)
-    extends Schema {
-  override val isBoolean: Boolean = true
-  override def validate: Boolean = false
+case class BooleanSchema(attributes: SchemaAttributes) extends Schema {
+  override val primitive: Boolean = true
+  override val boolean: Boolean = true
+  override val validated: Boolean = false
+  final override val required: Boolean = true
 }
 
-case class NullSchema(name: String, path: List[String], common: SchemaCommon, description: Option[String] = None)
-    extends Schema {
-  override def validate: Boolean = false
-  override def mandatory: Boolean = false
+case class NullSchema(attributes: SchemaAttributes) extends Schema {
+  override val primitive: Boolean = true
+  override val validated: Boolean = false
+  final override val required: Boolean = false
 }
 
 case class ArraySchema(
-  name: String,
-  path: List[String],
-  common: SchemaCommon,
-  description: Option[String] = None,
-  mandatory: Boolean = false,
+  attributes: SchemaAttributes,
   item: Option[Schema] = None,
   minItems: Option[Int] = None,
   maxItems: Option[Int] = None)
     extends Schema {
-  override val isPrimitive: Boolean = false
-  override def validate: Boolean = item.exists(_.validate) || minItems.isDefined || maxItems.isDefined
+
+  override val primitive: Boolean = false
+  override val validated: Boolean = item.exists(_.validated) || minItems.isDefined || maxItems.isDefined
 }
 
 case class InternalSchemaReference(
-  name: String,
-  path: List[String],
-  common: SchemaCommon,
-  description: Option[String] = None,
+  attributes: SchemaAttributes,
   reference: String,
   schema: Schema,
   requiredFields: Seq[String])
     extends Schema {
-  override val isPrimitive: Boolean = schema.isPrimitive
-  override def mandatory: Boolean = requiredFields.contains(name)
-  override def validate: Boolean = schema.validate
+
+  override val primitive: Boolean = schema.primitive
+  override val required: Boolean = requiredFields.contains(name)
+  override val validated: Boolean = schema.validated
 }
 
 case class ExternalSchemaReference(
-  name: String,
-  path: List[String],
-  common: SchemaCommon,
-  description: Option[String] = None,
+  attributes: SchemaAttributes,
   reference: String,
   schema: Schema,
   requiredFields: Seq[String])
     extends Schema {
-  override val isPrimitive: Boolean = schema.isPrimitive
-  override def mandatory: Boolean = requiredFields.contains(name)
-  override def validate: Boolean = schema.validate
+
+  override val primitive: Boolean = schema.primitive
+  override val required: Boolean = requiredFields.contains(name)
+  override val validated: Boolean = schema.validated
 }
 
-case class SchemaStub(name: String, path: List[String], description: Option[String] = None, reference: String)
-    extends Schema {
+case class SchemaStub(attributes: SchemaAttributes, reference: String) extends Schema {
 
-  override val common: SchemaCommon = SchemaCommon()
-  override def mandatory: Boolean = false
-  override def validate: Boolean = false
-  override val isPrimitive: Boolean = false
+  override val required: Boolean = false
+  override val validated: Boolean = false
+  override val primitive: Boolean = false
 
 }
 
 object SchemaStub {
   def apply(schema: Schema, reference: String): SchemaStub =
-    new SchemaStub(schema.name, schema.path, schema.description, reference)
+    new SchemaStub(schema.attributes, reference)
 }

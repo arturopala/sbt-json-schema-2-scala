@@ -42,7 +42,7 @@ object ScalaCodeGeneratorContext {
       case o: ObjectSchema =>
         o.properties.foldLeft[Option[(String, String)]](None)((a, p) => a.orElse(findUniqueKey(p, o :: path)))
       case _ => None
-    }).orElse(schema.common.definitions
+    }).orElse(schema.definitions
       .foldLeft[Option[(String, String)]](None)((a, p) => a.orElse(findUniqueKey(p, path))))
 
   private def findKeys(schema: Schema, path: List[Schema] = Nil): Seq[(String, String)] =
@@ -51,18 +51,18 @@ object ScalaCodeGeneratorContext {
       case o: ObjectSchema =>
         o.properties.flatMap(findKeys(_, o :: path))
       case _ => Seq.empty
-    }) ++ schema.common.definitions.flatMap(s => findKeys(s, s :: path))
+    }) ++ schema.definitions.flatMap(s => findKeys(s, s :: path))
 
   private def accessorFor(path: List[Schema], nested: String = "", option: Boolean = false): String = path match {
     case (o: ObjectSchema) :: xs =>
       val prefix =
         if (o.name.isEmpty) ""
-        else if (o.mandatory) s"${ScalaTypeNameProvider.toIdentifier(o.name)}."
+        else if (o.required) s"${ScalaTypeNameProvider.toIdentifier(o.name)}."
         else s"${o.name}.${if (option) "flatMap" else "map"}(_."
-      val suffix = if (o.name.isEmpty) "" else if (!o.mandatory) ")" else ""
-      accessorFor(xs, prefix + nested + suffix, !o.mandatory || option)
+      val suffix = if (o.name.isEmpty) "" else if (!o.required) ")" else ""
+      accessorFor(xs, prefix + nested + suffix, !o.required || option)
     case (s: Schema) :: xs =>
-      accessorFor(xs, s.name, !s.mandatory)
+      accessorFor(xs, s.name, !s.required)
     case Nil => if (option) nested else s"Option($nested)"
   }
 
@@ -80,7 +80,7 @@ object ScalaCodeGeneratorContext {
       .toSeq
 
   private def mapCommonVals(schema: Schema): Seq[(String, String)] =
-    schema.common.definitions.flatMap(mapCommonVals) ++
+    schema.definitions.flatMap(mapCommonVals) ++
       (schema match {
         case stringSchema: StringSchema =>
           externalizePattern(stringSchema) ++ externalizeEnum(stringSchema)

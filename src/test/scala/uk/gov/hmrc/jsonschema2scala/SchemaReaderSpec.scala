@@ -42,7 +42,7 @@ class SchemaReaderSpec extends WordSpec with Matchers with TestSchemas {
       s"read ${schema.name} schema" in {
         val json = schema.json
         val definition = SchemaReader.read(schema.name, json, allSchemas)
-        definition.isPrimitive shouldBe false
+        definition.primitive shouldBe false
       }
     }
   }

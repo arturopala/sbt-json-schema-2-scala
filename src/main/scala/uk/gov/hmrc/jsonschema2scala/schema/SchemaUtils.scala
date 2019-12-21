@@ -16,8 +16,6 @@
 
 package uk.gov.hmrc.jsonschema2scala.schema
 
-import play.api.libs.json.JsValue
-
 object SchemaUtils {
 
   def listSchemaUriToSchema(schema: Schema): Seq[(String, Schema)] =
@@ -34,30 +32,34 @@ object SchemaUtils {
       case _                        => Seq.empty
     })
 
-  def copy(schema: Schema, name: String, path: List[String], description: Option[String]): Schema = schema match {
-    case s: ObjectSchema =>
-      s.copy(name = name, path = path, description = description.orElse(schema.description))
-    case s: ArraySchema =>
-      s.copy(name = name, path = path, description = description.orElse(schema.description))
-    case s: MapSchema =>
-      s.copy(name = name, path = path, description = description.orElse(schema.description))
-    case s: OneOfSchema =>
-      s.copy(name = name, path = path, description = description.orElse(schema.description))
-    case s: StringSchema =>
-      s.copy(name = name, path = path, description = description.orElse(schema.description))
-    case s: NumberSchema =>
-      s.copy(name = name, path = path, description = description.orElse(schema.description))
-    case s: IntegerSchema =>
-      s.copy(name = name, path = path, description = description.orElse(schema.description))
-    case s: BooleanSchema =>
-      s.copy(name = name, path = path, description = description.orElse(schema.description))
-    case s: NullSchema =>
-      s.copy(name = name, path = path, description = description.orElse(schema.description))
-    case s: InternalSchemaReference =>
-      s.copy(name = name, path = path, description = description.orElse(schema.description))
-    case s: ExternalSchemaReference =>
-      s.copy(name = name, path = path, description = description.orElse(schema.description))
-    case s: SchemaStub =>
-      s.copy(name = name, path = path, description = description.orElse(schema.description))
+  def copy(schema: Schema, name: String, path: List[String], description: Option[String]): Schema = {
+    val newAttributes =
+      schema.attributes.copy(name = name, path = path, description = description.orElse(schema.description))
+    schema match {
+      case s: ObjectSchema =>
+        s.copy(attributes = newAttributes)
+      case s: ArraySchema =>
+        s.copy(attributes = newAttributes)
+      case s: MapSchema =>
+        s.copy(attributes = newAttributes)
+      case s: OneOfSchema =>
+        s.copy(attributes = newAttributes)
+      case s: StringSchema =>
+        s.copy(attributes = newAttributes)
+      case s: NumberSchema =>
+        s.copy(attributes = newAttributes)
+      case s: IntegerSchema =>
+        s.copy(attributes = newAttributes)
+      case s: BooleanSchema =>
+        s.copy(attributes = newAttributes)
+      case s: NullSchema =>
+        s.copy(attributes = newAttributes)
+      case s: InternalSchemaReference =>
+        s.copy(attributes = newAttributes)
+      case s: ExternalSchemaReference =>
+        s.copy(attributes = newAttributes)
+      case s: SchemaStub =>
+        s.copy(attributes = newAttributes)
+    }
   }
 }

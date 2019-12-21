@@ -19,7 +19,7 @@ package uk.gov.hmrc.jsonschema2scala.schema
 import java.net.URI
 
 import play.api.libs.json.{JsArray, JsNumber, JsObject, JsString, JsValue}
-import uk.gov.hmrc.jsonschema2scala.schema.SchemaVocabulary.{arrayCoreVocabulary, arrayValidationVocabulary, keywordsIn, numberValidationVocabulary, objectCoreVocabulary, objectValidationVocabulary, stringValidationVocabulary, vocabulary, vocabularyWithoutMeta}
+import uk.gov.hmrc.jsonschema2scala.schema.SchemaVocabulary._
 
 import scala.util.Try
 
@@ -53,12 +53,16 @@ object SchemaReader {
   case class Parameters(
     name: String,
     path: List[String],
-    common: SchemaCommon,
-    json: JsObject,
     description: Option[String],
-    isMandatory: Boolean,
+    definitions: Seq[Schema],
+    required: Boolean,
+    json: JsObject,
     requiredFields: Seq[String],
-    referenceResolver: SchemaReferenceResolver)
+    referenceResolver: SchemaReferenceResolver) {
+
+    val a: SchemaAttributes =
+      SchemaAttributes(name, path, description, definitions, required)
+  }
 
   def readSchema(
     name: String,
@@ -80,9 +84,7 @@ object SchemaReader {
     val definitions: Seq[Schema] = readDefinitions("definitions", name, path, json, description, referenceResolver) ++
       readDefinitions("$defs", name, path, json, description, referenceResolver)
 
-    val common = SchemaCommon(definitions)
-
-    val p = Parameters(name, path, common, json, description, isMandatory, requiredFields, referenceResolver)
+    val p = Parameters(name, path, description, definitions, isMandatory, json, requiredFields, referenceResolver)
 
     attemptReadExplicitType(p)
       .orElse { attemptReadReference(p) }
@@ -132,7 +134,7 @@ object SchemaReader {
       case "string"  => readStringSchema(p)
       case "number"  => readNumberSchema(p)
       case "integer" => readIntegerSchema(p)
-      case "boolean" => BooleanSchema(p.name, p.path, p.common, p.description, mandatory = true)
+      case "boolean" => BooleanSchema(p.a)
       case "object"  => readObjectSchema(p)
       case "array"   => readArraySchema(p)
       case "null"    => readObjectSchema(p)
@@ -146,16 +148,13 @@ object SchemaReader {
     val variants: Seq[Schema] = schemaTypeArray.distinct.map {
       case JsString(valueType) =>
         valueType match {
-          case "string" =>
-            StringSchema(p.name, p.path, p.common, p.description, p.isMandatory)
-          case "number"  => NumberSchema(p.name, p.path, p.common, p.description, p.isMandatory)
-          case "integer" => IntegerSchema(p.name, p.path, p.common, p.description, p.isMandatory)
-          case "boolean" => BooleanSchema(p.name, p.path, p.common, p.description, mandatory = true)
-          case "object" =>
-            ObjectSchema(p.name, p.path, p.common, p.description, p.isMandatory, Seq.empty, Seq.empty)
-          case "null" => NullSchema(p.name, p.path, p.common, p.description)
-          case "array" =>
-            ArraySchema(p.name, p.path, p.common, p.description, p.isMandatory)
+          case "string"  => StringSchema(p.a)
+          case "number"  => NumberSchema(p.a)
+          case "integer" => IntegerSchema(p.a)
+          case "boolean" => BooleanSchema(p.a)
+          case "object"  => ObjectSchema(p.a)
+          case "null"    => NullSchema(p.a)
+          case "array"   => ArraySchema(p.a)
           case other =>
             throw new IllegalStateException(
               s"Invalid type name, expected one of [null, boolean, object, array, number, integer, string], but got $other")
@@ -166,7 +165,7 @@ object SchemaReader {
     }
     if (variants.isEmpty) throw new IllegalStateException(s"")
     else if (variants.size == 1) variants.head
-    else OneOfSchema(p.name, p.path, p.common, p.description, p.isMandatory, variants, Seq.empty)
+    else OneOfSchema(p.a, variants)
   }
 
   def attemptReadReference(p: Parameters): Option[Schema] =
@@ -187,26 +186,12 @@ object SchemaReader {
 
       case Some(referencedSchema) =>
         if (p.referenceResolver.isInternal(referencedSchema.uri)) {
-          if (referencedSchema.isPrimitive)
+          if (referencedSchema.primitive)
             SchemaUtils.copy(referencedSchema, p.name, "$ref" :: p.path, p.description)
           else
-            InternalSchemaReference(
-              name = p.name,
-              path = "$ref" :: p.path,
-              common = p.common,
-              description = p.description,
-              reference = reference,
-              schema = referencedSchema,
-              requiredFields = p.requiredFields)
+            InternalSchemaReference(p.a, reference, referencedSchema, p.requiredFields)
         } else
-          ExternalSchemaReference(
-            name = p.name,
-            path = "$ref" :: p.path,
-            common = p.common,
-            description = p.description,
-            reference = reference,
-            schema = referencedSchema,
-            requiredFields = p.requiredFields)
+          ExternalSchemaReference(p.a, reference = reference, referencedSchema, p.requiredFields)
 
       case None =>
         throw new IllegalStateException(s"Cannot resolve schema reference $reference.")
@@ -221,7 +206,7 @@ object SchemaReader {
       }
 
   def readOneOfSchema(p: Parameters, array: JsArray, alternativeRequiredFields: Seq[Set[String]]): OneOfSchema = {
-    val props = array.value.zipWithIndex.map {
+    val variants = array.value.zipWithIndex.map {
       case (jsObject: JsObject, i) =>
         readSchema(
           p.name,
@@ -233,15 +218,7 @@ object SchemaReader {
         throw new IllegalArgumentException(
           s"Invalid oneOf schema, expected ${p.path.reverse.mkString("/")}[$i] to be an object, but got ${other.getClass.getSimpleName}")
     }
-    OneOfSchema(
-      name = p.name,
-      path = p.path,
-      common = p.common,
-      description = p.description,
-      mandatory = p.isMandatory,
-      variants = props,
-      alternativeRequiredFields = alternativeRequiredFields
-    )
+    OneOfSchema(p.a, variants, alternativeRequiredFields)
   }
 
   def readObjectSchema(p: Parameters): Schema = {
@@ -264,24 +241,11 @@ object SchemaReader {
     (propertiesOpt, patternPropertiesOpt, additionalPropertiesOpt) match {
 
       case (None, Some(patternProperties), None) =>
-        MapSchema(
-          name = p2.name,
-          path = p2.path,
-          common = p2.common,
-          description = p2.description,
-          mandatory = p2.isMandatory,
-          patternProperties = patternProperties,
-          requiredFields = required,
-          alternativeRequiredFields = alternatives
-        )
+        MapSchema(p.a, patternProperties, required, alternatives)
 
       case _ =>
         ObjectSchema(
-          name = p2.name,
-          path = p2.path,
-          common = p2.common,
-          description = p2.description,
-          mandatory = p2.isMandatory,
+          attributes = p.a,
           properties =
             propertiesOpt.getOrElse(Seq.empty) ++
               additionalPropertiesOpt.getOrElse(Seq.empty),
@@ -388,15 +352,7 @@ object SchemaReader {
           throw new IllegalStateException(s"Invalid schema, expected object or an array, but got $other")
       })
 
-    ArraySchema(
-      name = p.name,
-      path = p.path,
-      common = p.common,
-      description = p.description,
-      mandatory = p.isMandatory,
-      item = itemDefinition,
-      minItems = minItems,
-      maxItems = maxItems)
+    ArraySchema(p.a, itemDefinition, minItems, maxItems)
   }
 
   def readDefinitions(
@@ -456,19 +412,14 @@ object SchemaReader {
       )
 
     StringSchema(
-      name = p.name,
-      path = p.path,
-      common = p.common,
-      description = p.description,
-      mandatory = p.isMandatory,
+      attributes = p.a,
       pattern = pattern,
       enum = enum,
       minLength = minLength,
       maxLength = maxLength,
       isUniqueKey = isUniqueKey,
       isKey = isKey,
-      customGenerator = customGenerator
-    )
+      customGenerator = customGenerator)
   }
 
   def readNumberSchema(p: Parameters): NumberSchema = {
@@ -480,16 +431,11 @@ object SchemaReader {
     val customGenerator = (p.json \ "x_gen").asOpt[String]
 
     NumberSchema(
-      name = p.name,
-      path = p.path,
-      common = p.common,
-      description = p.description,
-      mandatory = p.isMandatory,
+      attributes = p.a,
       customGenerator = customGenerator,
       minimum = minimum,
       maximum = maximum,
-      multipleOf = multipleOf
-    )
+      multipleOf = multipleOf)
   }
 
   def readIntegerSchema(p: Parameters): IntegerSchema = {
@@ -501,11 +447,7 @@ object SchemaReader {
     val customGenerator = (p.json \ "x_gen").asOpt[String]
 
     IntegerSchema(
-      name = p.name,
-      path = p.path,
-      common = p.common,
-      description = p.description,
-      mandatory = p.isMandatory,
+      attributes = p.a,
       customGenerator = customGenerator,
       minimum = minimum,
       maximum = maximum,
@@ -541,8 +483,8 @@ object SchemaReader {
           .map(enum =>
             enum match {
               case (_: JsString) :: _ => readStringSchema(p)
-              case (_: JsNumber) :: _ => NumberSchema(p.name, p.path, p.common, p.description, p.isMandatory)
-              case (_: JsArray) :: _  => ArraySchema(p.name, p.path, p.common, p.description, p.isMandatory, None)
+              case (_: JsNumber) :: _ => NumberSchema(p.a)
+              case (_: JsArray) :: _  => ArraySchema(p.a)
               case other              => throw new IllegalStateException(s"Unsupported feature, enum of $other")
           })
       }

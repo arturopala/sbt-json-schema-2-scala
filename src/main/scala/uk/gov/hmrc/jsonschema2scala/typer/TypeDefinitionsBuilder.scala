@@ -48,10 +48,11 @@ object TypeDefinitionsBuilder {
               name,
               Nil,
               ObjectSchema(
-                name = schema.name,
-                path = schema.path,
-                description = schema.description,
-                mandatory = schema.mandatory),
+                attributes = SchemaAttributes(
+                  name = schema.name,
+                  path = schema.path,
+                  description = schema.description,
+                  required = schema.required)),
               nestedTypes = types
             ))
       }
@@ -98,7 +99,7 @@ object TypeDefinitionsBuilder {
 
   def processTemplates(name: String, path: List[String], schema: Schema)(
     implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] =
-    schema.common.definitions
+    schema.definitions
       .flatMap { schema =>
         val childTypeName = typeNameProvider.toTypeName(schema)
         processSchema(childTypeName, name :: path, schema)
@@ -128,7 +129,7 @@ object TypeDefinitionsBuilder {
 
     val templateNames: Set[String] = listTemplateNames(oneOfSchema, typeNameProvider)
 
-    val eligible: Seq[Schema] = oneOfSchema.variants.filterNot(_.isPrimitive)
+    val eligible: Seq[Schema] = oneOfSchema.variants.filterNot(_.primitive)
 
     val typeDefinitions = eligible.size match {
 
@@ -178,10 +179,11 @@ object TypeDefinitionsBuilder {
           oneOfTypeName,
           path,
           ObjectSchema(
-            name = name,
-            path = oneOfSchema.path,
-            description = oneOfSchema.description,
-            mandatory = oneOfSchema.mandatory),
+            attributes = SchemaAttributes(
+              name = name,
+              path = oneOfSchema.path,
+              description = oneOfSchema.description,
+              required = oneOfSchema.required)),
           isInterface = true,
           subtypes = subtypes
         )
@@ -203,7 +205,7 @@ object TypeDefinitionsBuilder {
   def processMapSchema(name: String, path: List[String], mapSchema: MapSchema)(
     implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] = {
 
-    val eligible = mapSchema.patternProperties.filterNot(_.isPrimitive)
+    val eligible = mapSchema.patternProperties.filterNot(_.primitive)
 
     val typeDefinitions = eligible
       .flatMap { schema =>
@@ -215,7 +217,7 @@ object TypeDefinitionsBuilder {
   }
 
   def listTemplateNames(schema: Schema, typeNameProvider: TypeNameProvider): Set[String] =
-    schema.common.definitions.map(typeNameProvider.toTypeName).toSet
+    schema.definitions.map(typeNameProvider.toTypeName).toSet
 
   def calculateExternalImports(schema: ObjectSchema)(implicit typeNameProvider: TypeNameProvider): Set[String] =
     schema.properties.flatMap {
@@ -224,7 +226,7 @@ object TypeDefinitionsBuilder {
         oneOf.variants.collect { case o: ObjectSchema => o }.flatMap(calculateExternalImports)
       case a: ArraySchema if a.item.exists(_.isInstanceOf[ExternalSchemaReference]) =>
         Set(typeNameProvider.toTypeName(a.item.asInstanceOf[ObjectSchema]))
-      case e: ExternalSchemaReference if !e.isPrimitive =>
+      case e: ExternalSchemaReference if !e.primitive =>
         Set(typeNameProvider.toTypeName(e))
       case _ => Set()
     }.toSet

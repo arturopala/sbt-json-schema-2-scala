@@ -279,7 +279,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
             comment = schema.description
         ))
 
-  def fieldOrder(schema: Schema): Int = if (schema.mandatory) 0 else if (schema.isBoolean) 1 else 2
+  def fieldOrder(schema: Schema): Int = if (schema.required) 0 else if (schema.boolean) 1 else 2
 
   def generateInterfaceMethods(interfaceFields: Set[(String, String)])(
     implicit typeNameProvider: TypeNameProvider): Seq[ScalaCode] =
@@ -314,14 +314,14 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
     implicit typeResolver: TypeResolver,
     typeNameProvider: TypeNameProvider): String =
     typeDef.schema.properties
-      .filter(_.mandatory)
+      .filter(_.required)
       .take(maxNumberOfArgs)
       .map(prop => s"""${variableName(prop)} <- ${generateValueGenerator(typeDef, prop, context)}""".stripMargin)
       .mkString("\n    ")
 
   def generateGenFieldsInitialization(typeDef: TypeDefinition)(implicit typeNameProvider: TypeNameProvider): String =
     typeDef.schema.properties
-      .filter(_.mandatory)
+      .filter(_.required)
       .take(maxNumberOfArgs)
       .map(prop => s"""${typeNameProvider.toIdentifier(prop.name)} = ${variableName(prop)}""".stripMargin)
       .mkString("\n    ", ",\n    ", "\n  ")
@@ -408,7 +408,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
       case _ => gen
     }
 
-    if (!property.mandatory && wrapOption) s"""Generator.optionGen($genWithConstraints)""" else genWithConstraints
+    if (!property.required && wrapOption) s"""Generator.optionGen($genWithConstraints)""" else genWithConstraints
   }
 
   def generatePropertyValidators(typeDef: TypeDefinition, context: ScalaCodeGeneratorContext)(
@@ -444,7 +444,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
             .map(_.map(a => {
               typeDef.schema.properties
                 .find(_.name == a)
-                .map(prop => s"_.$a${if (prop.isBoolean) ".asOption" else ""}")
+                .map(prop => s"_.$a${if (prop.boolean) ".asOption" else ""}")
                 .get
             }).mkString("Set(", ",", ")"))
             .mkString("Seq(", ",", ")")},"${typeDef.schema.alternativeRequiredFields
@@ -501,7 +501,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
           case Some(x)               => generateValueValidator(x, context)
           case None                  => None
         }).map(vv =>
-          if (property.mandatory || isMandatory) s""" checkEach($propertyExtractor, $vv)"""
+          if (property.required || isMandatory) s""" checkEach($propertyExtractor, $vv)"""
           else s"""  checkEachIfSome($propertyExtractor, $vv)""")
         val minValidatorOpt = a.minItems.map(min =>
           s"""   check(_.size >= $min,"Invalid array size, must be greater than or equal to $min")""")
@@ -514,26 +514,26 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
         else itemValidator
 
       case _: ObjectSchema =>
-        if (property.mandatory || isMandatory)
+        if (property.required || isMandatory)
           Some(s""" checkProperty($propertyExtractor, ${typeNameProvider.toTypeName(property)}.validate)""")
         else Some(s"""  checkIfSome($propertyExtractor, ${typeNameProvider.toTypeName(property)}.validate)""")
 
       case o: OneOfSchema =>
         if (o.variants.isEmpty) None
-        else if (o.variants.size == 1) generateValueValidator(o.variants.head, context, o.mandatory)
+        else if (o.variants.size == 1) generateValueValidator(o.variants.head, context, o.required)
         else
           o.variants.head match {
             case _: ObjectSchema =>
-              if (property.mandatory || isMandatory)
+              if (property.required || isMandatory)
                 Some(s""" checkProperty($propertyExtractor, ${typeNameProvider.toTypeName(property)}.validate)""")
               else Some(s"""  checkIfSome($propertyExtractor, ${typeNameProvider.toTypeName(property)}.validate)""")
             case _ =>
-              generateValueValidator(o.variants.head, context, o.mandatory)
+              generateValueValidator(o.variants.head, context, o.required)
           }
 
       case _: BooleanSchema => None
       case _: ExternalSchemaReference =>
-        if (property.mandatory || isMandatory)
+        if (property.required || isMandatory)
           Some(s""" checkProperty($propertyExtractor, ${typeNameProvider.toTypeName(property)}.validate)""")
         else Some(s"""  checkIfSome($propertyExtractor, ${typeNameProvider.toTypeName(property)}.validate)""")
     }
@@ -542,15 +542,14 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
   def generateValueValidatorCall(property: Schema, context: ScalaCodeGeneratorContext, isMandatory: Boolean = false)(
     implicit typeNameProvider: TypeNameProvider): Option[String] =
     property match {
-      case d: Schema if d.validate =>
+      case d: Schema if d.validated =>
         Some(s"""  checkProperty(_.${typeNameProvider.toIdentifier(property.name)}, ${property.name}Validator)""")
       case _ => None
     }
 
   def generateSanitizerList(typeDef: TypeDefinition): String = {
     val simpleSanitizerList = typeDef.schema.properties
-      .filter(p =>
-        !(p.mandatory && p.isPrimitive) && !typeDef.schema.alternativeRequiredFields.exists(_.contains(p.name)))
+      .filter(p => !(p.required && p.primitive) && !typeDef.schema.alternativeRequiredFields.exists(_.contains(p.name)))
       .take(maxNumberOfArgs)
       .map(prop => s"${prop.name}Sanitizer")
     val sanitizerList =
@@ -569,62 +568,62 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
     val simpleSanitizers: Seq[Option[ScalaCode]] = typeDef.schema.properties
       .take(maxNumberOfArgs)
       .toList
-      .map(prop =>
-        if (prop.mandatory) {
-          if (prop.isPrimitive) None
+      .map(schema =>
+        if (schema.required) {
+          if (schema.primitive) None
           else
             Some(
               ValueDefinition(
-                name = s"${prop.name}Sanitizer",
+                name = s"${schema.name}Sanitizer",
                 returnType = "Update",
                 body = Seq(s"""seed => entity =>
-                              |    entity.copy(${typeNameProvider.toIdentifier(prop.name)} = ${prop match {
+                              |    entity.copy(${typeNameProvider.toIdentifier(schema.name)} = ${schema match {
                                 case o: ObjectSchema =>
                                   s"${typeNameProvider.toTypeName(o)}.sanitize(seed)(entity.${typeNameProvider
-                                    .toIdentifier(prop.name)})"
-                                case a: ArraySchema if !a.item.forall(_.isPrimitive) =>
-                                  s"entity.${typeNameProvider.toIdentifier(prop.name)}.map(item => ${typeNameProvider
+                                    .toIdentifier(schema.name)})"
+                                case a: ArraySchema if !a.item.forall(_.primitive) =>
+                                  s"entity.${typeNameProvider.toIdentifier(schema.name)}.map(item => ${typeNameProvider
                                     .toTypeName(a.item.get)}.sanitize(seed)(item))"
-                                case o: OneOfSchema if o.variants.nonEmpty && !o.variants.head.isPrimitive =>
+                                case o: OneOfSchema if o.variants.nonEmpty && !o.variants.head.primitive =>
                                   if (o.variants.size == 1)
                                     s"${typeNameProvider.toTypeName(o.variants.head)}.sanitize(seed)(entity.${typeNameProvider
-                                      .toIdentifier(prop.name)})"
+                                      .toIdentifier(schema.name)})"
                                   else
                                     o.variants
                                       .map(v =>
                                         s"case x:${typeNameProvider.toTypeName(v)} => ${typeNameProvider.toTypeName(v)}.sanitize(seed)(x)")
                                       .mkString(
-                                        s"entity.${typeNameProvider.toIdentifier(prop.name)} match {\n  ",
+                                        s"entity.${typeNameProvider.toIdentifier(schema.name)} match {\n  ",
                                         "\n  ",
                                         "\n}")
-                                case _ => s"entity.${typeNameProvider.toIdentifier(prop.name)}"
+                                case _ => s"entity.${typeNameProvider.toIdentifier(schema.name)}"
                               }})
          """.stripMargin)
               ))
         } else
           Some(ValueDefinition(
-            name = s"${prop.name}Sanitizer",
+            name = s"${schema.name}Sanitizer",
             returnType = "Update",
-            body = Seq(if (prop.isPrimitive) {
-              if (prop.validate)
+            body = Seq(if (schema.primitive) {
+              if (schema.validated)
                 s"""seed => entity =>
-                   |    entity.copy(${prop.name} = ${prop.name}Validator(entity.${prop.name}).fold(_ => None, _ => entity.${prop.name})
-                   |      .orElse(Generator.get(${generateValueGenerator(typeDef, prop, context, wrapOption = false)})(seed)))
+                   |    entity.copy(${schema.name} = ${schema.name}Validator(entity.${schema.name}).fold(_ => None, _ => entity.${schema.name})
+                   |      .orElse(Generator.get(${generateValueGenerator(typeDef, schema, context, wrapOption = false)})(seed)))
                    """.stripMargin
               else
                 s"""seed => entity =>
-                   |    entity.copy(${prop.name} = Generator.get(${generateValueGenerator(
+                   |    entity.copy(${schema.name} = Generator.get(${generateValueGenerator(
                      typeDef,
-                     prop,
+                     schema,
                      context,
                      wrapOption = false)})(seed))
            """.stripMargin
             } else
               s"""seed => entity =>
-                 |    entity.copy(${typeNameProvider.toIdentifier(prop.name)} = entity.${typeNameProvider.toIdentifier(
-                   prop.name)}
-                 |      .orElse(Generator.get(${generateValueGenerator(typeDef, prop, context, wrapOption = false)})(seed))${generateSanitizerSuffix(
-                   prop)})
+                 |    entity.copy(${typeNameProvider.toIdentifier(schema.name)} = entity.${typeNameProvider
+                   .toIdentifier(schema.name)}
+                 |      .orElse(Generator.get(${generateValueGenerator(typeDef, schema, context, wrapOption = false)})(seed))${generateSanitizerSuffix(
+                   schema)})
            """.stripMargin)
           )))
 
@@ -688,7 +687,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
                             .find(_.name == name)
                             .map(
                               prop =>
-                                if (prop.isBoolean)
+                                if (prop.boolean)
                                   s"""$name = true"""
                                 else
                                   s"""$name = entity.$name.orElse(Generator.get(${generateValueGenerator(
@@ -705,7 +704,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
                             .find(_.name == name)
                             .map(
                               prop =>
-                                if (prop.isBoolean)
+                                if (prop.boolean)
                                   s"""$name = false"""
                                 else
                                   s"""$name = None""")

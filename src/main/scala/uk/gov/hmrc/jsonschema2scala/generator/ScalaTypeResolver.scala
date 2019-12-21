@@ -55,8 +55,8 @@ class ScalaTypeResolver(
       case oneOfSchema: OneOfSchema =>
         if (oneOfSchema.variants.isEmpty) "Nothing"
         else if (oneOfSchema.variants.size == 1) typeOf(oneOfSchema.variants.head, viewpoint, wrapAsOption = false)
-        else if (oneOfSchema.variants.forall(_.isPrimitive)) "AnyVal"
-        else if (oneOfSchema.variants.forall(v => !v.isPrimitive)) schemaTypeNameAsSeenFrom(oneOfSchema, viewpoint)
+        else if (oneOfSchema.variants.forall(_.primitive)) "AnyVal"
+        else if (oneOfSchema.variants.forall(v => !v.primitive)) schemaTypeNameAsSeenFrom(oneOfSchema, viewpoint)
         else "Any"
 
       case internalReference: InternalSchemaReference =>
@@ -69,8 +69,8 @@ class ScalaTypeResolver(
         schemaTypeNameAsSeenFrom(schemaStub.reference, viewpoint)
     }
 
-    if (!schema.mandatory && wrapAsOption) s"Option[$typeName]${if (showDefaultValue) " = None" else ""}"
-    else { s"""$typeName${if (showDefaultValue && schema.isBoolean) " = false" else ""}""" }
+    if (!schema.required && wrapAsOption) s"Option[$typeName]${if (showDefaultValue) " = None" else ""}"
+    else { s"""$typeName${if (showDefaultValue && schema.boolean) " = false" else ""}""" }
   }
 
   override def interfacesOf(schema: Schema, viewpoint: TypeDefinition): Set[String] = {
