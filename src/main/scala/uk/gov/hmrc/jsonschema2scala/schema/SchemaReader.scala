@@ -19,7 +19,6 @@ package uk.gov.hmrc.jsonschema2scala.schema
 import java.net.URI
 
 import play.api.libs.json.{JsArray, JsNumber, JsObject, JsString, JsValue}
-import uk.gov.hmrc.jsonschema2scala.schema.SchemaVocabulary._
 
 import scala.util.Try
 
@@ -81,8 +80,14 @@ object SchemaReader {
 
     val description: Option[String] = externalDescription.orElse(attemptReadDescription(json))
 
-    val definitions: Seq[Schema] = readDefinitions("definitions", name, path, json, description, referenceResolver) ++
-      readDefinitions("$defs", name, path, json, description, referenceResolver)
+    val definitions: Seq[Schema] = readDefinitions(
+      Keywords.definitions,
+      name,
+      path,
+      json,
+      description,
+      referenceResolver) ++
+      readDefinitions(Keywords.`$defs`, name, path, json, description, referenceResolver)
 
     val p = Parameters(name, path, description, definitions, isMandatory, json, requiredFields, referenceResolver)
 
@@ -91,12 +96,12 @@ object SchemaReader {
       .orElse { attemptReadOneOf(p) }
       .orElse { attemptReadImplicitType(p) }
       .getOrElse {
-        val ks = keywordsIn(vocabularyWithoutMeta)(json.fields)
+        val ks = Vocabulary.keywordsIn(Vocabulary.allKeywordsButMeta)(json.fields)
         if (ks.nonEmpty) {
           throw new IllegalStateException(s"Unsupported schema feature(s): ${ks.mkString("|")}.")
         } else {
           // fallback to read implicit object schema
-          readObjectSchema(p.copy(json = JsObject(Seq("properties" -> json))))
+          readObjectSchema(p.copy(json = JsObject(Seq(Keywords.properties -> json))))
         }
       }
   }
@@ -456,16 +461,16 @@ object SchemaReader {
   }
 
   final val implicitReaders: Seq[(Set[String], Parameters => Schema)] = Seq(
-    objectCoreVocabulary       -> readObjectSchema,
-    objectValidationVocabulary -> readObjectSchema,
-    stringValidationVocabulary -> readStringSchema,
-    numberValidationVocabulary -> readNumberSchema,
-    arrayCoreVocabulary        -> readArraySchema,
-    arrayValidationVocabulary  -> readArraySchema
+    Vocabulary.objectCoreVocabulary       -> readObjectSchema,
+    Vocabulary.objectValidationVocabulary -> readObjectSchema,
+    Vocabulary.stringValidationVocabulary -> readStringSchema,
+    Vocabulary.numberValidationVocabulary -> readNumberSchema,
+    Vocabulary.arrayCoreVocabulary        -> readArraySchema,
+    Vocabulary.arrayValidationVocabulary  -> readArraySchema
   )
 
   def attemptReadImplicitType(p: Parameters): Option[Schema] = {
-    import SchemaVocabulary._
+    import Vocabulary._
 
     val fields: Seq[String] = p.json.fields.map(_._1)
 
