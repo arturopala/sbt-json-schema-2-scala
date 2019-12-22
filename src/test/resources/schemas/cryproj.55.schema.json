@@ -15,7 +15,7 @@
 				"properties": {
 					"name": {
 						"$id": "/properties/console_variables/items/properties/name",
-						"$ref": "#/definitions/cvars"
+						"$ref": "http://json.schemastore.org/cryproj.55.schema#/definitions/cvars"
 					},
 					"value": {
 						"$id": "/properties/console_variables/items/properties/value",
@@ -260,7 +260,7 @@
 				"properties": {
 					"name": {
 						"$id": "/properties/console_commands/items/properties/name",
-						"$ref": "#/definitions/commands"
+						"$ref": "http://json.schemastore.org/cryproj.55.schema#/definitions/commands"
 					},
 					"value": {
 						"$id": "/properties/console_commands/items/properties/value",

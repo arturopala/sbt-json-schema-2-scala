@@ -35,6 +35,8 @@ trait SchemaReferenceResolver {
   def isInternal(reference: String): Boolean
 
   def resolveUri(uri: URI): URI
+
+  def listKnownUri: List[URI]
 }
 
 object SchemaReferenceResolver {
@@ -57,10 +59,13 @@ object CachingReferenceResolver {
     rootUri: URI,
     schemaName: String,
     schema: JsObject,
-    upstreamResolver: Option[SchemaReferenceResolver]): SchemaReferenceResolver = upstreamResolver match {
-    case Some(resolver @ CachingReferenceResolver(`rootUri`, _, _, _)) => resolver
-    case _                                                             => CachingReferenceResolver(rootUri, schemaName, schema, upstreamResolver)
-  }
+    upstreamResolver: Option[SchemaReferenceResolver]): SchemaReferenceResolver =
+    upstreamResolver match {
+      case Some(resolver @ CachingReferenceResolver(`rootUri`, _, _, _)) =>
+        resolver
+      case _ =>
+        CachingReferenceResolver(rootUri, schemaName, schema, upstreamResolver)
+    }
 
   case class CachingReferenceResolver(
     rootUri: URI,
@@ -69,9 +74,9 @@ object CachingReferenceResolver {
     upstreamResolver: Option[SchemaReferenceResolver])
       extends SchemaReferenceResolver {
 
-    val rootUriString: String = rootUri.toString
+    lazy val rootUriString: String = rootUri.toString
 
-    val cache: mutable.Map[String, Schema] = collection.mutable.Map[String, Schema]()
+    lazy val cache: mutable.Map[String, Schema] = collection.mutable.Map[String, Schema]()
 
     override def lookupJson(reference: String): Option[JsValue] = {
 
@@ -148,6 +153,9 @@ object CachingReferenceResolver {
     }
 
     override def resolveUri(givenUri: URI): URI = rootUri.resolve(givenUri)
+
+    override def listKnownUri: List[URI] =
+      rootUri :: upstreamResolver.map(_.listKnownUri).getOrElse(Nil)
   }
 
   def computeAbsoluteAndRelativeUriString(rootUri: URI, givenUri: URI): (String, String) =
@@ -214,5 +222,8 @@ object MultiSourceReferenceResolver {
       override def isInternal(reference: String): Boolean = false
 
       override def resolveUri(uri: URI): URI = uri
+
+      override def listKnownUri: List[URI] =
+        resolvers.flatMap(_.listKnownUri).toList ::: upstreamResolver.map(_.listKnownUri).getOrElse(Nil)
     }
 }

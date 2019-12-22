@@ -11,10 +11,10 @@
           "pattern": "\\.less$"
         },
         "options": {
-          "$ref": "compilerdefaults-schema.json#/definitions/less"
+          "$ref": "compilerdefaults.json#/definitions/less"
         },
         "minify": {
-          "$ref": "compilerdefaults-schema.json#/definitions/cssMinify"
+          "$ref": "compilerdefaults.json#/definitions/cssMinify"
         }
       }
     },
@@ -25,10 +25,10 @@
           "pattern": "\\.(scss|sass)$"
         },
         "options": {
-          "$ref": "compilerdefaults-schema.json#/definitions/sass"
+          "$ref": "compilerdefaults.json#/definitions/sass"
         },
         "minify": {
-          "$ref": "compilerdefaults-schema.json#/definitions/cssMinify"
+          "$ref": "compilerdefaults.json#/definitions/cssMinify"
         }
       }
     },
@@ -39,10 +39,10 @@
           "pattern": "\\.styl$"
         },
         "options": {
-          "$ref": "compilerdefaults-schema.json#/definitions/stylus"
+          "$ref": "compilerdefaults.json#/definitions/stylus"
         },
         "minify": {
-          "$ref": "compilerdefaults-schema.json#/definitions/cssMinify"
+          "$ref": "compilerdefaults.json#/definitions/cssMinify"
         }
       }
     },
@@ -53,10 +53,10 @@
           "pattern": "\\.coffee$|\\.litcoffee$"
         },
         "options": {
-          "$ref": "compilerdefaults-schema.json#/definitions/coffeeScript"
+          "$ref": "compilerdefaults.json#/definitions/coffeeScript"
         },
         "minify": {
-          "$ref": "compilerdefaults-schema.json#/definitions/javascriptMinify"
+          "$ref": "compilerdefaults.json#/definitions/javascriptMinify"
         }
       }
     },
@@ -67,10 +67,10 @@
           "pattern": "\\.iced$"
         },
         "options": {
-          "$ref": "compilerdefaults-schema.json#/definitions/coffeeScript"
+          "$ref": "compilerdefaults.json#/definitions/coffeeScript"
         },
         "minify": {
-          "$ref": "compilerdefaults-schema.json#/definitions/javascriptMinify"
+          "$ref": "compilerdefaults.json#/definitions/javascriptMinify"
         }
       }
     },
@@ -81,7 +81,7 @@
           "pattern": "\\.(jsx|js|es6)$"
         },
         "minify": {
-          "$ref": "compilerdefaults-schema.json#/definitions/javascriptMinify"
+          "$ref": "compilerdefaults.json#/definitions/javascriptMinify"
         }
       }
     },
@@ -103,7 +103,7 @@
         "minify": {
           "description": "Specify options for minification of the output file.",
           "type": "object",
-          "allOf": [ { "$ref": "compilerdefaults-schema.json#/definitions/baseMinify" } ]
+          "allOf": [ { "$ref": "compilerdefaults.json#/definitions/baseMinify" } ]
         },
         "outputFile": {
           "description": "The relative path to the desired output file name.",

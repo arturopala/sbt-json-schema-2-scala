@@ -208,7 +208,11 @@ object SchemaReader {
           ExternalSchemaReference(p.a, reference = reference, referencedSchema, p.requiredFields)
 
       case None =>
-        throw new IllegalStateException(s"Cannot resolve schema reference $reference.")
+        throw new IllegalStateException(
+          s"Cannot resolve schema reference $reference in the known schemas: ${p.referenceResolver.listKnownUri
+            .take(100)
+            .map(_.toString)
+            .mkString("\n\t", ",\n\t", "\n")}")
     }
   }
 
