@@ -1,5 +1,5 @@
 {
-	"id": "https://tools.wmflabs.org/spdx/schema/licenses.json",
+	"$id": "https://tools.wmflabs.org/spdx/schema/licenses.json",
 	"definitions": {
 		"license": {
 			"type": "string",

@@ -43,8 +43,10 @@ object SchemaReader {
   def read(uri: URI, name: String, json: JsObject, externalResolver: Option[SchemaReferenceResolver] = None): Schema = {
     val resolver = CachingReferenceResolver(uri, name, json, externalResolver)
     val path = SchemaReferenceResolver.rootPath(uri)
-    resolver.lookupSchema(uri.toString, (_, j) => readSchema(name, path, j, None, Seq.empty, resolver)) match {
-      case None         => throw new IllegalStateException(s"Unexpected error, schema lookup failed for $uri")
+    resolver.lookupSchema(uri.toString, (_, j, r) => readSchema(name, path, j, None, Seq.empty, r)) match {
+      case None =>
+        throw new IllegalStateException(s"Unexpected error, schema lookup failed for $uri")
+
       case Some(schema) => schema
     }
   }
@@ -62,6 +64,8 @@ object SchemaReader {
 
     val a: SchemaAttributes =
       SchemaAttributes(name, path, description, definitions, required, custom)
+
+    def currentUri: String = SchemaReferenceResolver.pathToUri(path)
   }
 
   val keywordsNotInVocabulary: Seq[(String, JsValue)] => Set[String] =
@@ -118,7 +122,14 @@ object SchemaReader {
   def attemptReadId(json: JsObject): Option[URI] =
     (json \ "$id")
       .asOpt[String]
-      .flatMap(s => Try(URI.create(s)).toOption)
+      .orElse {
+        (json \ "id")
+          .asOpt[String]
+      }
+      .flatMap(s => {
+        val s2 = if (s.endsWith("#")) s.dropRight(1) else s
+        Try(URI.create(s2)).toOption
+      })
       .map(_.normalize())
 
   def attemptReadDescription(json: JsObject): Option[String] =
@@ -194,9 +205,7 @@ object SchemaReader {
     val path2 = p.referenceResolver.uriToPath(reference)
 
     p.referenceResolver
-      .lookupSchema(
-        reference,
-        readSchema(_, path2, _, externalDescription = p.description, p.requiredFields, p.referenceResolver)) match {
+      .lookupSchema(reference, readSchema(_, path2, _, externalDescription = p.description, p.requiredFields, _)) match {
 
       case Some(referencedSchema) =>
         if (p.referenceResolver.isInternal(referencedSchema.uri)) {
@@ -208,11 +217,7 @@ object SchemaReader {
           ExternalSchemaReference(p.a, reference = reference, referencedSchema, p.requiredFields)
 
       case None =>
-        throw new IllegalStateException(
-          s"Cannot resolve schema reference $reference in the known schemas: ${p.referenceResolver.listKnownUri
-            .take(100)
-            .map(_.toString)
-            .mkString("\n\t", ",\n\t", "\n")}")
+        throw new IllegalStateException(s"Cannot resolve schema reference $reference when at ${p.currentUri}")
     }
   }
 
@@ -298,7 +303,9 @@ object SchemaReader {
       .asOpt[String]
       .flatMap(referenceResolver.lookupJson)
       .map {
-        case json: JsObject => deepDereference(json, referenceResolver)
+        case (json2: JsObject, resolver) =>
+          deepDereference(json2, resolver)
+
         case other =>
           throw new IllegalStateException(
             s"Invalid schema, expected $$ref target to be a valid schema object, but got $other")
@@ -460,7 +467,7 @@ object SchemaReader {
               val uri = SchemaReferenceResolver.pathToUri(name :: propertyName :: path)
               val path2 = referenceResolver.uriToPath(uri)
               referenceResolver
-                .lookupSchema(uri, readSchema(_, path2, _, description, Seq.empty, referenceResolver))
+                .lookupSchema(uri, readSchema(_, path2, _, description, Seq.empty, _))
             })
             .collect { case Some(x) => x }
       )

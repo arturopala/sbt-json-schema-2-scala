@@ -1,5 +1,6 @@
 {
     "$schema": "http://json-schema.org/draft-04/schema#",
+    "id": "http://json-schema.org/draft-04/schema",
     "description": "Modified JSON Schema draft v4 that includes the optional '$ref' and 'format'",
     "definitions": {
         "schemaArray": {

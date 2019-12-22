@@ -16,7 +16,7 @@
 
 package uk.gov.hmrc.jsonschema2scala.schema
 
-import java.net.{URI, URLEncoder}
+import java.net.URI
 
 import play.api.libs.json.{JsLookup, JsLookupResult, JsObject, JsValue}
 
@@ -24,9 +24,9 @@ import scala.collection.mutable
 
 trait SchemaReferenceResolver {
 
-  type SchemaReader = (String, JsObject) => Schema
+  type SchemaReader = (String, JsObject, SchemaReferenceResolver) => Schema
 
-  def lookupJson(reference: String): Option[JsValue]
+  def lookupJson(reference: String): Option[(JsValue, SchemaReferenceResolver)]
 
   def lookupSchema(reference: String, reader: SchemaReader): Option[Schema]
 
@@ -105,7 +105,7 @@ object CachingReferenceResolver {
 
     lazy val cache: mutable.Map[String, Schema] = collection.mutable.Map[String, Schema]()
 
-    override def lookupJson(reference: String): Option[JsValue] = {
+    override def lookupJson(reference: String): Option[(JsValue, SchemaReferenceResolver)] = {
 
       val isFragment: Boolean = reference.startsWith("#")
       val uri: URI = URI.create(reference)
@@ -121,6 +121,7 @@ object CachingReferenceResolver {
               .asOpt[JsValue]
 
           result
+            .map(v => (v, this))
 
         } else None
       }.orElse {
@@ -147,10 +148,10 @@ object CachingReferenceResolver {
               .asOpt[JsObject]
               .map { schemaJson =>
                 // prevent cycles by caching a schema stub
-                val stub = SchemaStub(reader(name, emptyJsObject), absolute)
+                val stub = SchemaStub(reader(name, emptyJsObject, this), absolute)
                 cache.update(absolute, stub)
 
-                val schema: Schema = reader(name, schemaJson)
+                val schema: Schema = reader(name, schemaJson, this)
 
                 cache.update(absolute, schema)
                 schema
@@ -196,9 +197,9 @@ object MultiSourceReferenceResolver {
       lazy val resolvers: Seq[SchemaReferenceResolver] =
         schemaSources.map(s => CachingReferenceResolver(s.uri, s.name, s.json, None))
 
-      override def lookupJson(reference: String): Option[JsValue] =
+      override def lookupJson(reference: String): Option[(JsValue, SchemaReferenceResolver)] =
         resolvers
-          .foldLeft[Option[JsValue]](None)(
+          .foldLeft[Option[(JsValue, SchemaReferenceResolver)]](None)(
             (a, r) =>
               a.orElse(
                 r.lookupJson(reference)
