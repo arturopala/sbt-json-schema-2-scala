@@ -46,9 +46,9 @@ object SchemaReferenceResolver {
   final def pathToUri(path: List[String]): String =
     path.reverse.filterNot(_.isEmpty) match {
       case Nil           => ""
-      case x :: Nil      => encode(x)
-      case x :: y :: Nil => if (y == "#") encode(x) else s"${encode(x)}/${encode(y)}"
-      case x :: xs       => (if (x == "#") "#/" else encode(x)) + xs.map(encode).mkString("/")
+      case x :: Nil      => x
+      case x :: y :: Nil => if (y == "#") x else s"$x/$y"
+      case x :: xs       => (if (x == "#") "#/" else x) + xs.mkString("/")
     }
 
   def computeAbsoluteAndRelativeUriString(rootUri: URI, givenUri: URI): (String, String) =
@@ -75,8 +75,6 @@ object SchemaReferenceResolver {
     uri1.getScheme == uri2.getScheme && uri1.getHost == uri2.getHost && uri1.getPath == uri2.getPath
 
   final val emptyJsObject = JsObject(Seq())
-
-  final def encode(s: String): String = URLEncoder.encode(s, "utf-8")
 
 }
 
@@ -110,7 +108,7 @@ object CachingReferenceResolver {
     override def lookupJson(reference: String): Option[JsValue] = {
 
       val isFragment: Boolean = reference.startsWith("#")
-      val uri: URI = URI.create(encode(reference))
+      val uri: URI = URI.create(reference)
       val (absolute, relative) = computeAbsoluteAndRelativeUriString(rootUri, uri)
 
       {
@@ -133,7 +131,7 @@ object CachingReferenceResolver {
     override def lookupSchema(reference: String, reader: SchemaReader): Option[Schema] = {
 
       val isFragment: Boolean = reference.startsWith("#")
-      val uri: URI = URI.create(encode(reference))
+      val uri: URI = URI.create(reference)
       val (absolute, relative) = computeAbsoluteAndRelativeUriString(rootUri, uri)
 
       cache
@@ -168,7 +166,7 @@ object CachingReferenceResolver {
     }
 
     override def uriToPath(reference: String): List[String] = {
-      val uri = URI.create(encode(reference))
+      val uri = URI.create(reference)
       val (root, fragment) =
         (
           if (uri.isAbsolute) reference.takeWhile(_ != '#') else rootUriString,
@@ -177,7 +175,7 @@ object CachingReferenceResolver {
     }
 
     override def isInternal(reference: String): Boolean = {
-      val uri2 = URI.create(encode(reference))
+      val uri2 = URI.create(reference)
       !uri2.isAbsolute || sameOrigin(rootUri, uri2) || upstreamResolver.exists(_.isInternal(reference))
     }
 
@@ -189,8 +187,6 @@ object CachingReferenceResolver {
 }
 
 object MultiSourceReferenceResolver {
-
-  import SchemaReferenceResolver.encode
 
   def apply(
     schemaSources: Seq[SchemaSource],
@@ -219,7 +215,7 @@ object MultiSourceReferenceResolver {
           .orElse(upstreamResolver.flatMap(_.lookupSchema(reference, reader)))
 
       override def uriToPath(reference: String): List[String] = {
-        val uri2 = URI.create(encode(reference))
+        val uri2 = URI.create(reference)
         val (root, fragment) =
           (if (uri2.isAbsolute) reference.takeWhile(_ != '#') else "", "#" + Option(uri2.getFragment).getOrElse(""))
         (root :: fragment.split("/").toList).reverse

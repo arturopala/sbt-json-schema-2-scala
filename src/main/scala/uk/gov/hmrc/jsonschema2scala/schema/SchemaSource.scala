@@ -20,7 +20,6 @@ import java.io.{File, InputStream}
 import java.net.URI
 
 import play.api.libs.json.{JsObject, Json}
-import uk.gov.hmrc.jsonschema2scala.schema.SchemaReferenceResolver.encode
 
 import scala.io.Source
 import scala.util.{Failure, Success, Try}
@@ -59,7 +58,7 @@ case class SchemaFile(file: File) extends SchemaSource {
     }
   }
 
-  override def defaultURI: URI = URI.create(encode(name))
+  override def defaultURI: URI = URI.create(name)
 }
 
 case class SchemaResource(inputStream: InputStream, name: String) extends SchemaSource {
@@ -74,6 +73,6 @@ case class SchemaResource(inputStream: InputStream, name: String) extends Schema
     }
   }
 
-  override def defaultURI: URI = URI.create(encode(name))
+  override def defaultURI: URI = URI.create(name)
 
 }
