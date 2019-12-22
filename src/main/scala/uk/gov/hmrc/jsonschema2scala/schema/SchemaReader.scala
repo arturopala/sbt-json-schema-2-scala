@@ -245,7 +245,8 @@ object SchemaReader {
 
       case (other, i) =>
         throw new IllegalArgumentException(
-          s"Invalid oneOf schema, expected ${p.path.reverse.mkString("/")}[$i] to be an object, but got ${other.getClass.getSimpleName}")
+          s"Invalid ${if (isOneOf) "oneOf" else "anyOf"} schema, expected ${p.path.reverse
+            .mkString("/")}[$i] to be an object, but got ${other.getClass.getSimpleName}")
     }
     OneOfAnyOfSchema(p.a, variants, alternativeRequiredFields, isOneOf)
   }
