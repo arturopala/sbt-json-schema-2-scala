@@ -18,7 +18,7 @@ package uk.gov.hmrc.jsonschema2scala.schema
 
 import java.net.URI
 
-import play.api.libs.json.{JsLookup, JsObject}
+import play.api.libs.json.{JsLookup, JsLookupResult, JsObject, JsValue}
 
 import scala.collection.mutable
 
@@ -26,7 +26,9 @@ trait SchemaReferenceResolver {
 
   type SchemaReader = (String, JsObject) => Schema
 
-  def lookup(reference: String, reader: SchemaReader): Option[Schema]
+  def lookupJson(reference: String): Option[JsValue]
+
+  def lookupSchema(reference: String, reader: SchemaReader): Option[Schema]
 
   def uriToPath(reference: String): List[String]
 
@@ -71,35 +73,45 @@ object CachingReferenceResolver {
 
     val cache: mutable.Map[String, Schema] = collection.mutable.Map[String, Schema]()
 
-    override def lookup(reference: String, reader: SchemaReader): Option[Schema] = {
+    override def lookupJson(reference: String): Option[JsValue] = {
 
       val isFragment: Boolean = reference.startsWith("#")
-
       val uri: URI = URI.create(reference)
+      val (absolute, relative) = computeAbsoluteAndRelativeUriString(rootUri, uri)
 
-      val (absolute, relative) = if (uri.isAbsolute) {
-        (uri.toString, rootUri.relativize(uri).toString)
-      } else {
-        val a = rootUri.resolve(uri)
-        (a.toString, a.relativize(uri).toString)
+      {
+        if (isFragment || absolute.startsWith(rootUriString)) {
+
+          val jsonPointer: List[String] = toJsonPointer(relative)
+
+          val result: Option[JsValue] =
+            resolveJsonPointer(jsonPointer)(json)
+              .asOpt[JsValue]
+
+          result
+
+        } else None
+      }.orElse {
+        if (isFragment) None else upstreamResolver.flatMap(_.lookupJson(reference))
       }
+    }
+
+    override def lookupSchema(reference: String, reader: SchemaReader): Option[Schema] = {
+
+      val isFragment: Boolean = reference.startsWith("#")
+      val uri: URI = URI.create(reference)
+      val (absolute, relative) = computeAbsoluteAndRelativeUriString(rootUri, uri)
 
       cache
         .get(absolute)
         .orElse {
           if (isFragment || absolute.startsWith(rootUriString)) {
 
-            val jsonPointer: List[String] = relative
-              .split("/")
-              .filterNot(_.isEmpty)
-              .dropWhile(_ == "#")
-              .toList
+            val jsonPointer: List[String] = toJsonPointer(relative)
 
             val name = if (jsonPointer.isEmpty) schemaName else jsonPointer.last
 
-            val result: Option[Schema] = jsonPointer
-              .foldLeft[JsLookup](json)((s, p) => s \ p)
-              .result
+            val result: Option[Schema] = resolveJsonPointer(jsonPointer)(json)
               .asOpt[JsObject]
               .map { schemaJson =>
                 // prevent cycles by caching a schema stub
@@ -117,7 +129,7 @@ object CachingReferenceResolver {
           } else None
         }
         .orElse {
-          if (isFragment) None else upstreamResolver.flatMap(_.lookup(reference, reader))
+          if (isFragment) None else upstreamResolver.flatMap(_.lookupSchema(reference, reader))
         }
     }
 
@@ -138,6 +150,26 @@ object CachingReferenceResolver {
     override def resolveUri(givenUri: URI): URI = rootUri.resolve(givenUri)
   }
 
+  def computeAbsoluteAndRelativeUriString(rootUri: URI, givenUri: URI): (String, String) =
+    if (givenUri.isAbsolute) {
+      (givenUri.toString, rootUri.relativize(givenUri).toString)
+    } else {
+      val a = rootUri.resolve(givenUri)
+      (a.toString, a.relativize(givenUri).toString)
+    }
+
+  def toJsonPointer(relative: String): List[String] =
+    relative
+      .split("/")
+      .filterNot(_.isEmpty)
+      .dropWhile(_ == "#")
+      .toList
+
+  def resolveJsonPointer(jsonPointer: List[String])(json: JsObject): JsLookupResult =
+    jsonPointer
+      .foldLeft[JsLookup](json)((s, p) => s \ p)
+      .result
+
   def sameOrigin(uri1: URI, uri2: URI): Boolean =
     uri1.getScheme == uri2.getScheme && uri1.getHost == uri2.getHost && uri1.getPath == uri2.getPath
 
@@ -154,14 +186,23 @@ object MultiSourceReferenceResolver {
       lazy val resolvers: Seq[SchemaReferenceResolver] =
         schemaSources.map(s => CachingReferenceResolver(s.uri, s.name, s.json, None))
 
-      override def lookup(reference: String, reader: SchemaReader): Option[Schema] =
+      override def lookupJson(reference: String): Option[JsValue] =
+        resolvers
+          .foldLeft[Option[JsValue]](None)(
+            (a, r) =>
+              a.orElse(
+                r.lookupJson(reference)
+            ))
+          .orElse(upstreamResolver.flatMap(_.lookupJson(reference)))
+
+      override def lookupSchema(reference: String, reader: SchemaReader): Option[Schema] =
         resolvers
           .foldLeft[Option[Schema]](None)(
             (a, r) =>
               a.orElse(
-                r.lookup(reference, reader)
+                r.lookupSchema(reference, reader)
             ))
-          .orElse(upstreamResolver.flatMap(_.lookup(reference, reader)))
+          .orElse(upstreamResolver.flatMap(_.lookupSchema(reference, reader)))
 
       override def uriToPath(reference: String): List[String] = {
         val uri2 = URI.create(reference)
