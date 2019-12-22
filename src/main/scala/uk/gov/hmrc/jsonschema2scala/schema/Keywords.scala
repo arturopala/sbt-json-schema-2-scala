@@ -7,8 +7,10 @@ object Keywords {
   final val `$id` = "$id"
   final val `$defs` = "$defs"
   final val `$ref` = "$ref"
+  final val `$recursiveRef` = "$recursiveRef"
   final val `$comment` = "$comment"
   final val `$anchor` = "$anchor"
+  final val `$recursiveAnchor` = "$recursiveAnchor"
 
   final val definitions = "definitions"
   final val title = "title"

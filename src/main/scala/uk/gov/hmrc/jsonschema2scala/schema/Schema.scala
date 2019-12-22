@@ -82,10 +82,11 @@ case class MapSchema(
   def isEmpty: Boolean = patternProperties.isEmpty
 }
 
-case class OneOfSchema(
+case class OneOfAnyOfSchema(
   attributes: SchemaAttributes,
   variants: Seq[Schema] = Seq.empty,
-  alternativeRequiredFields: Seq[Set[String]] = Seq.empty)
+  alternativeRequiredFields: Seq[Set[String]] = Seq.empty,
+  isOneOf: Boolean)
     extends Schema {
 
   override val primitive: Boolean = variants.forall(_.primitive)

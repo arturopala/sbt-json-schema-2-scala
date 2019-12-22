@@ -26,7 +26,7 @@ object SchemaUtils {
           .getOrElse(Seq.empty)
       case s: MapSchema =>
         s.patternProperties.flatMap(listSchemaUriToSchema)
-      case s: OneOfSchema =>
+      case s: OneOfAnyOfSchema =>
         s.variants.flatMap(listSchemaUriToSchema)
       case arraySchema: ArraySchema => arraySchema.item.map(listSchemaUriToSchema).getOrElse(Seq.empty)
       case _                        => Seq.empty
@@ -42,7 +42,7 @@ object SchemaUtils {
         s.copy(attributes = newAttributes)
       case s: MapSchema =>
         s.copy(attributes = newAttributes)
-      case s: OneOfSchema =>
+      case s: OneOfAnyOfSchema =>
         s.copy(attributes = newAttributes)
       case s: StringSchema =>
         s.copy(attributes = newAttributes)

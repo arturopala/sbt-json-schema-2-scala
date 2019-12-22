@@ -68,7 +68,7 @@ object TypeDefinitionsBuilder {
 
     val types: Seq[TypeDefinition] = schema match {
       case objectSchema: ObjectSchema        => processObjectSchema(name, path, objectSchema)
-      case oneOfSchema: OneOfSchema          => processOneOfSchema(name, path, oneOfSchema) ++ templates
+      case oneOfSchema: OneOfAnyOfSchema     => processOneOfSchema(name, path, oneOfSchema) ++ templates
       case arraySchema: ArraySchema          => processArraySchema(name, path, arraySchema) ++ templates
       case mapSchema: MapSchema              => processMapSchema(name, path, mapSchema) ++ templates
       case external: ExternalSchemaReference => processExternalSchemaReference(name, path, external) ++ templates
@@ -125,24 +125,24 @@ object TypeDefinitionsBuilder {
     Seq(TypeDefinition(name, path, objectSchema, sortByName(nestedTypeDefinitions ++ templates)))
   }
 
-  def processOneOfSchema(name: String, path: List[String], oneOfSchema: OneOfSchema)(
+  def processOneOfSchema(name: String, path: List[String], oneOfSchema: OneOfAnyOfSchema)(
     implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] = {
 
     val templateNames: Set[String] = listTemplateNames(oneOfSchema, typeNameProvider)
 
-    val eligible: Seq[Schema] = oneOfSchema.variants.filterNot(_.primitive)
+    val nonPrimitive: Seq[Schema] = oneOfSchema.variants.filterNot(_.primitive)
 
-    val typeDefinitions = eligible.size match {
+    val typeDefinitions = nonPrimitive.size match {
 
       case 0 => Seq.empty
 
       case 1 =>
-        processSchema(name, path, eligible.head)
+        processSchema(name, path, nonPrimitive.head)
 
       case many =>
         val oneOfTypeName = typeNameProvider.toTypeName(oneOfSchema)
         val sameNameCounters: Map[String, Counter] =
-          eligible
+          nonPrimitive
             .map(typeNameProvider.toTypeName)
             .groupBy(identity)
             .mapValues(_.size)
@@ -151,7 +151,7 @@ object TypeDefinitionsBuilder {
             .toSeq
             .toMap
         var pos = 0
-        val subtypes = eligible
+        val subtypes = nonPrimitive
           .flatMap { schema =>
             {
               val subtypeName = {
@@ -207,9 +207,9 @@ object TypeDefinitionsBuilder {
   def processMapSchema(name: String, path: List[String], mapSchema: MapSchema)(
     implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] = {
 
-    val eligible = mapSchema.patternProperties.filterNot(_.primitive)
+    val nonPrimitive = mapSchema.patternProperties.filterNot(_.primitive)
 
-    val typeDefinitions = eligible
+    val typeDefinitions = nonPrimitive
       .flatMap { schema =>
         val childTypeName = typeNameProvider.toTypePatternName(schema)
         processSchema(childTypeName, name :: path, schema)
@@ -224,7 +224,7 @@ object TypeDefinitionsBuilder {
   def calculateExternalImports(schema: ObjectSchema)(implicit typeNameProvider: TypeNameProvider): Set[String] =
     schema.properties.flatMap {
       case o: ObjectSchema => calculateExternalImports(o)
-      case oneOf: OneOfSchema if oneOf.variants.collect { case _: ObjectSchema => }.nonEmpty =>
+      case oneOf: OneOfAnyOfSchema if oneOf.variants.collect { case _: ObjectSchema => }.nonEmpty =>
         oneOf.variants.collect { case o: ObjectSchema => o }.flatMap(calculateExternalImports)
       case a: ArraySchema if a.item.exists(_.isInstanceOf[ExternalSchemaReference]) =>
         Set(typeNameProvider.toTypeName(a.item.asInstanceOf[ObjectSchema]))

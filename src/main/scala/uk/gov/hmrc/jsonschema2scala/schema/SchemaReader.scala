@@ -43,7 +43,7 @@ object SchemaReader {
   def read(uri: URI, name: String, json: JsObject, externalResolver: Option[SchemaReferenceResolver] = None): Schema = {
     val resolver = CachingReferenceResolver(uri, name, json, externalResolver)
     val path = SchemaReferenceResolver.rootPath(uri)
-    resolver.lookup(uri.toString, (_, j) => readSchema(name, path, j, None, Seq(""), resolver)) match {
+    resolver.lookup(uri.toString, (_, j) => readSchema(name, path, j, None, Seq.empty, resolver)) match {
       case None         => throw new IllegalStateException(s"Unexpected error, schema lookup failed for $uri")
       case Some(schema) => schema
     }
@@ -87,14 +87,8 @@ object SchemaReader {
 
     val description: Option[String] = externalDescription.orElse(attemptReadDescription(json))
 
-    val definitions: Seq[Schema] = readDefinitions(
-      Keywords.definitions,
-      name,
-      path,
-      json,
-      description,
-      referenceResolver) ++
-      readDefinitions(Keywords.`$defs`, name, path, json, description, referenceResolver)
+    val definitions: Seq[Schema] = readDefinitions("definitions", name, path, json, description, referenceResolver) ++
+      readDefinitions("$defs", name, path, json, description, referenceResolver)
 
     val custom: Option[Map[String, JsValue]] = {
       val set = keywordsNotInVocabulary(json.fields)
@@ -107,6 +101,7 @@ object SchemaReader {
     attemptReadExplicitType(p)
       .orElse { attemptReadReference(p) }
       .orElse { attemptReadOneOf(p) }
+      .orElse { attemptReadAnyOf(p) }
       .orElse { attemptReadImplicitType(p) }
       .getOrElse {
         val ks = keywordsInVocabularyNotMeta(json.fields)
@@ -183,7 +178,7 @@ object SchemaReader {
     }
     if (variants.isEmpty) throw new IllegalStateException(s"")
     else if (variants.size == 1) variants.head
-    else OneOfSchema(p.a, variants)
+    else OneOfAnyOfSchema(p.a, variants, isOneOf = true)
   }
 
   def attemptReadReference(p: Parameters): Option[Schema] =
@@ -216,14 +211,29 @@ object SchemaReader {
     }
   }
 
-  def attemptReadOneOf(p: Parameters, alternativeRequiredFields: Seq[Set[String]] = Seq.empty): Option[OneOfSchema] =
+  def attemptReadOneOf(
+    p: Parameters,
+    alternativeRequiredFields: Seq[Set[String]] = Seq.empty): Option[OneOfAnyOfSchema] =
     (p.json \ "oneOf")
       .asOpt[JsArray]
       .map { array =>
-        readOneOfSchema(p, array, alternativeRequiredFields)
+        readOneOfAnyOfSchema(p.copy(path = "oneOf" :: p.path), array, alternativeRequiredFields, isOneOf = true)
       }
 
-  def readOneOfSchema(p: Parameters, array: JsArray, alternativeRequiredFields: Seq[Set[String]]): OneOfSchema = {
+  def attemptReadAnyOf(
+    p: Parameters,
+    alternativeRequiredFields: Seq[Set[String]] = Seq.empty): Option[OneOfAnyOfSchema] =
+    (p.json \ "anyOf")
+      .asOpt[JsArray]
+      .map { array =>
+        readOneOfAnyOfSchema(p.copy(path = "anyOf" :: p.path), array, alternativeRequiredFields, isOneOf = false)
+      }
+
+  def readOneOfAnyOfSchema(
+    p: Parameters,
+    array: JsArray,
+    alternativeRequiredFields: Seq[Set[String]],
+    isOneOf: Boolean): OneOfAnyOfSchema = {
     val variants = array.value.zipWithIndex.map {
       case (jsObject: JsObject, i) =>
         readSchema(
@@ -232,11 +242,12 @@ object SchemaReader {
           jsObject,
           requiredFields = p.requiredFields,
           currentReferenceResolver = p.referenceResolver)
+
       case (other, i) =>
         throw new IllegalArgumentException(
           s"Invalid oneOf schema, expected ${p.path.reverse.mkString("/")}[$i] to be an object, but got ${other.getClass.getSimpleName}")
     }
-    OneOfSchema(p.a, variants, alternativeRequiredFields)
+    OneOfAnyOfSchema(p.a, variants, alternativeRequiredFields, isOneOf)
   }
 
   def readObjectSchema(p: Parameters): Schema = {

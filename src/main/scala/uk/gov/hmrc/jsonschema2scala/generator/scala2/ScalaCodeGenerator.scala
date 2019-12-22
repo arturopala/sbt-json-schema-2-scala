@@ -396,7 +396,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
             .getOrElse("Gen.chooseNum(1, 1000)")})"
         case o: ObjectSchema => s"${typeNameProvider.toTypeName(o)}.gen"
 
-        case o: OneOfSchema =>
+        case o: OneOfAnyOfSchema =>
           if (o.variants.isEmpty) "???"
           else if (o.variants.size == 1) generateValueGenerator(hostType, o.variants.head, context)
           else
@@ -529,7 +529,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
           Some(s""" checkProperty($propertyExtractor, ${typeNameProvider.toTypeName(property)}.validate)""")
         else Some(s"""  checkIfSome($propertyExtractor, ${typeNameProvider.toTypeName(property)}.validate)""")
 
-      case o: OneOfSchema =>
+      case o: OneOfAnyOfSchema =>
         if (o.variants.isEmpty) None
         else if (o.variants.size == 1) generateValueValidator(o.variants.head, context, o.required)
         else
@@ -595,7 +595,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
                                 case a: ArraySchema if !a.item.forall(_.primitive) =>
                                   s"entity.${typeNameProvider.toIdentifier(schema.name)}.map(item => ${typeNameProvider
                                     .toTypeName(a.item.get)}.sanitize(seed)(item))"
-                                case o: OneOfSchema if o.variants.nonEmpty && !o.variants.head.primitive =>
+                                case o: OneOfAnyOfSchema if o.variants.nonEmpty && !o.variants.head.primitive =>
                                   if (o.variants.size == 1)
                                     s"${typeNameProvider.toTypeName(o.variants.head)}.sanitize(seed)(entity.${typeNameProvider
                                       .toIdentifier(schema.name)})"
@@ -731,7 +731,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
       case a: ArraySchema =>
         s".map(_.map(${a.item.map(typeNameProvider.toTypeName).getOrElse(typeResolver.any)}.sanitize(seed)))"
       case o: ObjectSchema => s".map(${typeNameProvider.toTypeName(o)}.sanitize(seed))"
-      case o: OneOfSchema =>
+      case o: OneOfAnyOfSchema =>
         if (o.variants.isEmpty) ""
         else if (o.variants.size == 1) generateSanitizerSuffix(o.variants.head)
         else

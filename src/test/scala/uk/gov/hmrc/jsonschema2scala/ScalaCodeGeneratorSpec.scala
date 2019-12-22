@@ -226,7 +226,16 @@ class ScalaCodeGeneratorSpec
                                  |      ]
                                  |    },
                                  |    "second": {
-                                 |      "type": "number"
+                                 |      "oneOf":[
+                                 |         {
+                                 |           "type": "string",
+                                 |           "const": "foo"
+                                 |         },
+                                 |         {
+                                 |           "type": "string",
+                                 |           "const": "foo"
+                                 |         }
+                                 |      ]
                                  |    },
                                  |    "thi-rd": {
                                  |      "type": "boolean"

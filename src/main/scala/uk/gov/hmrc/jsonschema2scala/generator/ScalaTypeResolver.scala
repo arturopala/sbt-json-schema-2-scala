@@ -52,11 +52,15 @@ class ScalaTypeResolver(
           .map(item => s"Seq[${typeOf(item, viewpoint, wrapAsOption = false, showDefaultValue = false)}]")
           .getOrElse(s"Seq[$any]")
 
-      case oneOfSchema: OneOfSchema =>
+      case oneOfSchema: OneOfAnyOfSchema =>
         if (oneOfSchema.variants.isEmpty) "Nothing"
         else if (oneOfSchema.variants.size == 1) typeOf(oneOfSchema.variants.head, viewpoint, wrapAsOption = false)
-        else if (oneOfSchema.variants.forall(_.primitive)) "AnyVal"
-        else if (oneOfSchema.variants.forall(v => !v.primitive)) schemaTypeNameAsSeenFrom(oneOfSchema, viewpoint)
+        else if (oneOfSchema.variants.forall(_.primitive)) {
+          val types = oneOfSchema.variants
+            .map(typeOf(_, viewpoint, wrapAsOption = false, showDefaultValue = false))
+            .distinct
+          if (types.size == 1) types.head else "AnyVal"
+        } else if (oneOfSchema.variants.forall(v => !v.primitive)) schemaTypeNameAsSeenFrom(oneOfSchema, viewpoint)
         else "Any"
 
       case internalReference: InternalSchemaReference =>
