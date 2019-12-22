@@ -16,21 +16,22 @@
 
 package uk.gov.hmrc.jsonschema2scala.schema
 
-import java.net.URI
+import java.net.{URI, URLEncoder}
 
 import play.api.libs.json.{JsArray, JsNumber, JsObject, JsString, JsValue, Json}
+import uk.gov.hmrc.jsonschema2scala.schema.SchemaReferenceResolver.encode
 
 import scala.util.Try
 
 object SchemaReader {
 
   def read(name: String, json: JsObject): Schema = {
-    val uri = attemptReadId(json).getOrElse(URI.create(name))
+    val uri = attemptReadId(json).getOrElse(URI.create(encode(name)))
     read(uri, name, json, None)
   }
 
   def read(name: String, json: JsObject, otherSchemas: Seq[SchemaSource]): Schema = {
-    val uri = attemptReadId(json).getOrElse(URI.create(name))
+    val uri = attemptReadId(json).getOrElse(URI.create(encode(name)))
     read(uri, name, json, Some(MultiSourceReferenceResolver(otherSchemas)))
   }
 
@@ -118,7 +119,7 @@ object SchemaReader {
   def attemptReadId(json: JsObject): Option[URI] =
     (json \ "$id")
       .asOpt[String]
-      .flatMap(s => Try(URI.create(s)).toOption)
+      .flatMap(s => Try(URI.create(encode(s))).toOption)
       .map(_.normalize())
 
   def attemptReadDescription(json: JsObject): Option[String] =
@@ -191,7 +192,7 @@ object SchemaReader {
 
   def resolveReference(p: Parameters, reference: String): Schema = {
 
-    val path2 = p.referenceResolver.uriToPath(reference)
+    val path2 = p.referenceResolver.uriToPath(encode(reference))
 
     p.referenceResolver
       .lookupSchema(

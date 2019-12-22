@@ -16,7 +16,7 @@
 
 package uk.gov.hmrc.jsonschema2scala.schema
 
-import java.net.URI
+import java.net.{URI, URLEncoder}
 
 import play.api.libs.json.{JsLookup, JsLookupResult, JsObject, JsValue}
 
@@ -41,19 +41,48 @@ trait SchemaReferenceResolver {
 
 object SchemaReferenceResolver {
 
-  def rootPath(uri: URI): List[String] = "#" :: uri.toString :: Nil
+  final def rootPath(uri: URI): List[String] = "#" :: uri.toString :: Nil
 
-  def pathToUri(path: List[String]): String =
+  final def pathToUri(path: List[String]): String =
     path.reverse.filterNot(_.isEmpty) match {
       case Nil           => ""
-      case x :: Nil      => x
-      case x :: y :: Nil => if (y == "#") x else s"$x/$y"
-      case x :: xs       => (if (x == "#") "#/" else x) + xs.mkString("/")
+      case x :: Nil      => encode(x)
+      case x :: y :: Nil => if (y == "#") encode(x) else s"${encode(x)}/${encode(y)}"
+      case x :: xs       => (if (x == "#") "#/" else encode(x)) + xs.map(encode).mkString("/")
     }
+
+  def computeAbsoluteAndRelativeUriString(rootUri: URI, givenUri: URI): (String, String) =
+    if (givenUri.isAbsolute) {
+      (givenUri.toString, rootUri.relativize(givenUri).toString)
+    } else {
+      val a = rootUri.resolve(givenUri)
+      (a.toString, a.relativize(givenUri).toString)
+    }
+
+  def toJsonPointer(relative: String): List[String] =
+    relative
+      .split("/")
+      .filterNot(_.isEmpty)
+      .dropWhile(_ == "#")
+      .toList
+
+  def resolveJsonPointer(jsonPointer: List[String])(json: JsObject): JsLookupResult =
+    jsonPointer
+      .foldLeft[JsLookup](json)((s, p) => s \ p)
+      .result
+
+  def sameOrigin(uri1: URI, uri2: URI): Boolean =
+    uri1.getScheme == uri2.getScheme && uri1.getHost == uri2.getHost && uri1.getPath == uri2.getPath
+
+  final val emptyJsObject = JsObject(Seq())
+
+  final def encode(s: String): String = URLEncoder.encode(s, "utf-8")
 
 }
 
 object CachingReferenceResolver {
+
+  import SchemaReferenceResolver._
 
   def apply(
     rootUri: URI,
@@ -81,7 +110,7 @@ object CachingReferenceResolver {
     override def lookupJson(reference: String): Option[JsValue] = {
 
       val isFragment: Boolean = reference.startsWith("#")
-      val uri: URI = URI.create(reference)
+      val uri: URI = URI.create(encode(reference))
       val (absolute, relative) = computeAbsoluteAndRelativeUriString(rootUri, uri)
 
       {
@@ -104,7 +133,7 @@ object CachingReferenceResolver {
     override def lookupSchema(reference: String, reader: SchemaReader): Option[Schema] = {
 
       val isFragment: Boolean = reference.startsWith("#")
-      val uri: URI = URI.create(reference)
+      val uri: URI = URI.create(encode(reference))
       val (absolute, relative) = computeAbsoluteAndRelativeUriString(rootUri, uri)
 
       cache
@@ -139,7 +168,7 @@ object CachingReferenceResolver {
     }
 
     override def uriToPath(reference: String): List[String] = {
-      val uri = URI.create(reference)
+      val uri = URI.create(encode(reference))
       val (root, fragment) =
         (
           if (uri.isAbsolute) reference.takeWhile(_ != '#') else rootUriString,
@@ -148,7 +177,7 @@ object CachingReferenceResolver {
     }
 
     override def isInternal(reference: String): Boolean = {
-      val uri2 = URI.create(reference)
+      val uri2 = URI.create(encode(reference))
       !uri2.isAbsolute || sameOrigin(rootUri, uri2) || upstreamResolver.exists(_.isInternal(reference))
     }
 
@@ -157,34 +186,11 @@ object CachingReferenceResolver {
     override def listKnownUri: List[URI] =
       rootUri :: upstreamResolver.map(_.listKnownUri).getOrElse(Nil)
   }
-
-  def computeAbsoluteAndRelativeUriString(rootUri: URI, givenUri: URI): (String, String) =
-    if (givenUri.isAbsolute) {
-      (givenUri.toString, rootUri.relativize(givenUri).toString)
-    } else {
-      val a = rootUri.resolve(givenUri)
-      (a.toString, a.relativize(givenUri).toString)
-    }
-
-  def toJsonPointer(relative: String): List[String] =
-    relative
-      .split("/")
-      .filterNot(_.isEmpty)
-      .dropWhile(_ == "#")
-      .toList
-
-  def resolveJsonPointer(jsonPointer: List[String])(json: JsObject): JsLookupResult =
-    jsonPointer
-      .foldLeft[JsLookup](json)((s, p) => s \ p)
-      .result
-
-  def sameOrigin(uri1: URI, uri2: URI): Boolean =
-    uri1.getScheme == uri2.getScheme && uri1.getHost == uri2.getHost && uri1.getPath == uri2.getPath
-
-  val emptyJsObject = JsObject(Seq())
 }
 
 object MultiSourceReferenceResolver {
+
+  import SchemaReferenceResolver.encode
 
   def apply(
     schemaSources: Seq[SchemaSource],
@@ -213,7 +219,7 @@ object MultiSourceReferenceResolver {
           .orElse(upstreamResolver.flatMap(_.lookupSchema(reference, reader)))
 
       override def uriToPath(reference: String): List[String] = {
-        val uri2 = URI.create(reference)
+        val uri2 = URI.create(encode(reference))
         val (root, fragment) =
           (if (uri2.isAbsolute) reference.takeWhile(_ != '#') else "", "#" + Option(uri2.getFragment).getOrElse(""))
         (root :: fragment.split("/").toList).reverse
