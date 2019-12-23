@@ -33,7 +33,10 @@ object ScalaTypeNameProvider extends TypeNameProvider {
   }
 
   override def toIdentifier(name: String): String =
-    if (name.exists(noNameChars.contains) || scalaKeywords.contains(name)) s"`$name`" else name
+    if (name.exists(noNameChars.contains) || scalaKeywords.contains(name) || Character.isDigit(name.charAt(0)))
+      s"`$name`"
+    else if (objectMemberNames.contains(name)) s"__$name"
+    else name
 
   override def toTypeNameVariant(schema: Schema, pos: Int): String =
     s"${toTypeName(schema)}_$pos"
@@ -82,6 +85,9 @@ object ScalaTypeNameProvider extends TypeNameProvider {
     "with",
     "yield"
   )
+
+  final val objectMemberNames: Seq[String] =
+    Seq("wait", "notify", "notifyAll", "finalize", "equals", "finalize", "clone", "hashCode")
 
   final val noNameChars: Set[Char] = Set('@', '$', '-', '/', '.')
 }

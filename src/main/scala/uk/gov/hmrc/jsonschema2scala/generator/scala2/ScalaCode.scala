@@ -190,7 +190,9 @@ object ScalaCode {
 
   object BlockComment {
     def append(comment: String, b: CodeSink, doc: Boolean): Unit = {
-      val lines = TextUtils.splitAndNormalize(comment, 80)
+      val lines = TextUtils
+        .splitAndNormalize(comment, 80)
+        .map(escape)
       if (lines.nonEmpty) {
         lines.headOption.map(line => {
           b.append(if (doc) "/** " else "/* ")
@@ -205,6 +207,11 @@ object ScalaCode {
         b.append(if (doc) "  */" else " */")
       }
     }
+
+    def escape(s: String): String =
+      s.replaceAllLiterally("*/", "*&#47;")
+        .replaceAllLiterally("/*", "*&#47;*")
+        .replaceAllLiterally("\\", "&#92;")
   }
 
   case class MethodDefinition(
