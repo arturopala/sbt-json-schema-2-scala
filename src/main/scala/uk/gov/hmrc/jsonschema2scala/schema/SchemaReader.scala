@@ -16,9 +16,9 @@
 
 package uk.gov.hmrc.jsonschema2scala.schema
 
-import java.net.{URI, URLEncoder}
+import java.net.URI
 
-import play.api.libs.json.{JsArray, JsNumber, JsObject, JsString, JsValue, Json}
+import play.api.libs.json._
 
 import scala.util.Try
 
@@ -38,7 +38,8 @@ object SchemaReader {
     read(uri, name, json, Some(MultiSourceReferenceResolver(otherSchemas)))
 
   def readMany(sources: Seq[SchemaSource]): Seq[Schema] =
-    sources.map(source => read(source.uri, source.name, source.json, Some(MultiSourceReferenceResolver(sources))))
+    sources.map(source =>
+      source.json.fold(throw _, read(source.uri, source.name, _, Some(MultiSourceReferenceResolver(sources)))))
 
   def read(uri: URI, name: String, json: JsObject, externalResolver: Option[SchemaReferenceResolver] = None): Schema = {
     val resolver = CachingReferenceResolver(uri, name, json, externalResolver)

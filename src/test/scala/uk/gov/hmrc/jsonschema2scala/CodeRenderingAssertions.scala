@@ -38,7 +38,8 @@ trait CodeRenderingAssertions extends CompilationAssertions {
 
   def assertCanParseAndCompile(schemaSource: SchemaSource, otherSchemas: Seq[SchemaSource])(
     implicit compiler: Compiler): Unit = {
-    val definition = SchemaReader.read(schemaSource.uri, schemaSource.name, schemaSource.json, otherSchemas)
+    val definition =
+      schemaSource.json.fold(throw _, SchemaReader.read(schemaSource.uri, schemaSource.name, _, otherSchemas))
     assertCanParseAndCompile(definition, packageName = "a.b.c")
   }
 

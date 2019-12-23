@@ -22,23 +22,41 @@ import java.net.URI
 import play.api.libs.json.{JsObject, Json}
 
 import scala.io.Source
-import scala.util.{Failure, Success, Try}
+import scala.util.{Failure, Try}
 
 sealed trait SchemaSource {
 
   def name: String
-  def json: JsObject
+  def content: String
 
-  lazy val uri: URI = SchemaReader
-    .attemptReadId(json)
-    .getOrElse(defaultURI)
+  import uk.gov.hmrc.jsonschema2scala.utils.TryOps._
+
+  lazy val json: Either[Throwable, JsObject] = {
+    Try(Json.parse(content).as[JsObject]).toEither
+  }
+
+  lazy val uri: URI = json.fold(
+    throw _,
+    SchemaReader
+      .attemptReadId(_)
+      .getOrElse(defaultURI))
 
   def defaultURI: URI
+
+  protected def readSource(source: Source): String =
+    Try(removeBOM(source.mkString)).recoverWith {
+      case e =>
+        Try(source.close())
+        Failure(e)
+    }.get
+
+  private def removeBOM(s: String): String =
+    if (s.startsWith("\uFEFF")) s.substring(1) else s
 }
 
 case class SchemaFile(file: File) extends SchemaSource {
 
-  val name: String = {
+  override val name: String = {
     file.getName
       .split("\\.")
       .head
@@ -48,14 +66,9 @@ case class SchemaFile(file: File) extends SchemaSource {
       .mkString
   }
 
-  val json: JsObject = {
+  override val content: String = {
     val source: Source = Source.fromFile(file, "utf-8")
-    val json = Try(Json.parse(source.mkString).as[JsObject])
-    source.close()
-    json match {
-      case Success(value)     => value
-      case Failure(exception) => throw exception
-    }
+    readSource(source)
   }
 
   override def defaultURI: URI = URI.create(name)
@@ -63,14 +76,9 @@ case class SchemaFile(file: File) extends SchemaSource {
 
 case class SchemaResource(inputStream: InputStream, name: String) extends SchemaSource {
 
-  val json: JsObject = {
+  override val content: String = {
     val source: Source = Source.fromInputStream(inputStream, "utf-8")
-    val json = Try(Json.parse(source.mkString).as[JsObject])
-    Try(source.close())
-    json match {
-      case Success(value)     => value
-      case Failure(exception) => throw exception
-    }
+    readSource(source)
   }
 
   override def defaultURI: URI = URI.create(name)

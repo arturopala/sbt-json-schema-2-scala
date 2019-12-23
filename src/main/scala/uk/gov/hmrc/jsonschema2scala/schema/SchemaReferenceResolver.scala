@@ -197,7 +197,7 @@ object MultiSourceReferenceResolver {
     new SchemaReferenceResolver {
 
       lazy val resolvers: Seq[SchemaReferenceResolver] =
-        schemaSources.map(s => CachingReferenceResolver(s.uri, s.name, s.json, None))
+        schemaSources.map(s => s.json.fold(throw _, CachingReferenceResolver(s.uri, s.name, _, None)))
 
       override def lookupJson(uri: URI): Option[(JsValue, SchemaReferenceResolver)] =
         resolvers

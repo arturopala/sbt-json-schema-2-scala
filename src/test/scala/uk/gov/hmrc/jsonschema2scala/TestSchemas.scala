@@ -26,16 +26,21 @@ trait TestSchemas {
 
   lazy val unverifiedTestSchemas: Seq[SchemaSource] = testSchemaList
     .map(readSchemaSource)
-    .collect { case Some(x) => x }
 
   lazy val verifiedTestSchemas: Seq[SchemaSource] = verifiedTestSchemaList
     .map(readSchemaSource)
-    .collect { case Some(x) => x }
 
-  def readSchemaSource: String => Option[SchemaResource] = { filename =>
-    Try(classOf[SchemaReaderSpec].getResourceAsStream(f"/schemas/$filename")).map {
-      SchemaResource(_, filename)
-    }.toOption
+  import uk.gov.hmrc.jsonschema2scala.utils.TryOps._
+
+  def readSchemaSource: String => SchemaResource = { filename =>
+    Try(classOf[SchemaReaderSpec].getResourceAsStream(f"/schemas/$filename"))
+      .flatMap { is =>
+        Try(SchemaResource(is, filename))
+      }
+      .logError(e => {
+        sys.error(s"Creating test schema source $filename failed with $e")
+      })
+      .get
   }
 
   val verifiedTestSchemaList = Seq(
