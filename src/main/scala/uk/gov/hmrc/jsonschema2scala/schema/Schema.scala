@@ -170,6 +170,13 @@ case class NotSchema(attributes: SchemaAttributes, schema: Schema) extends Schem
   override val validated: Boolean = true
 }
 
+case class IfThenElseSchema(attributes: SchemaAttributes, condition: Schema, schema: Schema, elseSchema: Option[Schema])
+    extends Schema {
+
+  override val primitive: Boolean = schema.primitive && elseSchema.exists(_.primitive)
+  override val validated: Boolean = true
+}
+
 case class InternalSchemaReference(
   attributes: SchemaAttributes,
   reference: String,

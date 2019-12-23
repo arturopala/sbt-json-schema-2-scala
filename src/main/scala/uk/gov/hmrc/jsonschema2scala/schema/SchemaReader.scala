@@ -120,6 +120,7 @@ object SchemaReader {
         .orElse { attemptReadAnyOf(p) }
         .orElse { attemptReadAllOf(p) }
         .orElse { attemptReadNot(p) }
+        .orElse { attemptReadIfThenElse(p) }
         .orElse { attemptReadImplicitType(p) }
         .getOrElse {
           val ks = keywordsInVocabularyNotMeta(json.fields)
@@ -326,6 +327,29 @@ object SchemaReader {
         val schema: Schema =
           readSchema(p.name, "not" :: p.path, json, p.description, p.requiredFields, p.referenceResolver)
         NotSchema(p.a, schema)
+      }
+
+  def attemptReadIfThenElse(p: Parameters): Option[Schema] =
+    (p.json \ "if")
+      .asOpt[JsObject]
+      .flatMap { ifJson =>
+        (p.json \ "then")
+          .asOpt[JsObject]
+          .map { thenJson =>
+            val condition: Schema =
+              readSchema(p.name, "if" :: p.path, ifJson, p.description, p.requiredFields, p.referenceResolver)
+
+            val schema: Schema =
+              readSchema(p.name, "then" :: p.path, thenJson, p.description, p.requiredFields, p.referenceResolver)
+
+            val elseSchema: Option[Schema] = (p.json \ "else")
+              .asOpt[JsObject]
+              .map { elseJson =>
+                readSchema(p.name, "else" :: p.path, elseJson, p.description, p.requiredFields, p.referenceResolver)
+              }
+
+            IfThenElseSchema(p.a, condition, schema, elseSchema)
+          }
       }
 
   def deepDereference(json: JsObject, referenceResolver: SchemaReferenceResolver): JsObject =

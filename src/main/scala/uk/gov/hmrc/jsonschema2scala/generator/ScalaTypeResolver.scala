@@ -72,7 +72,16 @@ class ScalaTypeResolver(
         } else if (oneOfSchema.variants.forall(v => !v.primitive)) schemaTypeNameAsSeenFrom(oneOfSchema, viewpoint)
         else "Any"
 
-      case not: NotSchema => typeOf(not.schema, viewpoint, wrapAsOption, showDefaultValue)
+      case not: NotSchema => typeOf(not.schema, viewpoint, wrapAsOption = false, showDefaultValue)
+
+      case ite: IfThenElseSchema =>
+        ite.elseSchema match {
+          case None => typeOf(ite.schema, viewpoint, wrapAsOption = false, showDefaultValue)
+          case Some(elseSchema) =>
+            val schemaType = typeOf(ite.schema, viewpoint, wrapAsOption, showDefaultValue)
+            val elseSchemaType = typeOf(elseSchema, viewpoint, wrapAsOption, showDefaultValue)
+            if (schemaType == elseSchemaType) schemaType else "AnyRef"
+        }
 
       case internalReference: InternalSchemaReference =>
         typeOf(internalReference.schema, viewpoint, wrapAsOption = false, showDefaultValue = false)

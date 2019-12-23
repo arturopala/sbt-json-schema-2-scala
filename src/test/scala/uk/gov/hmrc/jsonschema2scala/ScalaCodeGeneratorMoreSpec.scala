@@ -44,8 +44,8 @@ class ScalaCodeGeneratorMoreSpec
     compiler.cleanup()
 
   "JsonSchema2ScalaCodeRenderer" should {
-    unverifiedTestSchemas.filter(_.name.matches("angular.schema.json")).foreach { schema: SchemaSource =>
-      s"generate scala code from ${schema.name}" in assertCanParseAndCompile(schema, unverifiedTestSchemas)
+    unverifiedTestSchemas.foreach { schema: SchemaSource =>
+      s"generate from ${schema.name}" in assertCanParseAndCompile(schema, unverifiedTestSchemas)
     }
   }
 

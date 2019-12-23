@@ -69,6 +69,7 @@ object TypeDefinitionsBuilder {
     val types: Seq[TypeDefinition] = schema match {
       case objectSchema: ObjectSchema        => processObjectSchema(name, path, objectSchema)
       case oneOfSchema: OneOfAnyOfSchema     => processOneOfSchema(name, path, oneOfSchema) ++ templates
+      case notSchema: NotSchema              => processSchema(name, path, notSchema) ++ templates
       case arraySchema: ArraySchema          => processArraySchema(name, path, arraySchema) ++ templates
       case mapSchema: MapSchema              => processMapSchema(name, path, mapSchema) ++ templates
       case external: ExternalSchemaReference => processExternalSchemaReference(name, path, external) ++ templates
@@ -223,13 +224,21 @@ object TypeDefinitionsBuilder {
 
   def calculateExternalImports(schema: ObjectSchema)(implicit typeNameProvider: TypeNameProvider): Set[String] =
     schema.properties.flatMap {
-      case o: ObjectSchema => calculateExternalImports(o)
-      case oneOf: OneOfAnyOfSchema if oneOf.variants.collect { case _: ObjectSchema => }.nonEmpty =>
-        oneOf.variants.collect { case o: ObjectSchema => o }.flatMap(calculateExternalImports)
-      case a: ArraySchema if a.items.exists(_.isInstanceOf[ExternalSchemaReference]) =>
-        Set(typeNameProvider.toTypeName(a.items.asInstanceOf[ObjectSchema]))
-      case e: ExternalSchemaReference if !e.primitive =>
-        Set(typeNameProvider.toTypeName(e))
+      case objectSchema: ObjectSchema =>
+        calculateExternalImports(objectSchema)
+
+      case oneOfAnyOfSchema: OneOfAnyOfSchema
+          if oneOfAnyOfSchema.variants.collect { case _: ObjectSchema => }.nonEmpty =>
+        oneOfAnyOfSchema.variants.collect { case o: ObjectSchema => o }.flatMap(calculateExternalImports)
+
+      case arraySchema: ArraySchema if arraySchema.items.exists(_.isInstanceOf[ExternalSchemaReference]) =>
+        Set(typeNameProvider.toTypeName(arraySchema.items.asInstanceOf[ObjectSchema]))
+
+      case NotSchema(_, objectSchema: ObjectSchema) => calculateExternalImports(objectSchema)
+
+      case reference: ExternalSchemaReference if !reference.primitive =>
+        Set(typeNameProvider.toTypeName(reference))
+
       case _ => Set()
     }.toSet
 
