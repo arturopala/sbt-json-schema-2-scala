@@ -43,7 +43,7 @@ object SchemaReader {
   def read(uri: URI, name: String, json: JsObject, externalResolver: Option[SchemaReferenceResolver] = None): Schema = {
     val resolver = CachingReferenceResolver(uri, name, json, externalResolver)
     val path = SchemaReferenceResolver.rootPath(uri)
-    resolver.lookupSchema(uri.toString, (_, j, r) => readSchema(name, path, j, None, Seq.empty, r)) match {
+    resolver.lookupSchema(uri, (_, j, r) => readSchema(name, path, j, None, Seq.empty, r)) match {
       case None =>
         throw new IllegalStateException(s"Unexpected error, schema lookup failed for $uri")
 
@@ -65,7 +65,7 @@ object SchemaReader {
     val a: SchemaAttributes =
       SchemaAttributes(name, path, description, definitions, required, custom)
 
-    def currentUri: String = SchemaReferenceResolver.pathToUri(path)
+    def currentUri: String = SchemaReferenceResolver.pathToReference(path)
   }
 
   val keywordsNotInVocabulary: Seq[(String, JsValue)] => Set[String] =
@@ -202,10 +202,12 @@ object SchemaReader {
 
   def resolveReference(p: Parameters, reference: String): Schema = {
 
-    val path2 = p.referenceResolver.uriToPath(reference)
+    val uri: URI = p.referenceResolver.resolveUri(URI.create(reference))
+
+    val path2 = p.referenceResolver.uriToPath(uri)
 
     p.referenceResolver
-      .lookupSchema(reference, readSchema(_, path2, _, externalDescription = p.description, p.requiredFields, _)) match {
+      .lookupSchema(uri, readSchema(_, path2, _, externalDescription = p.description, p.requiredFields, _)) match {
 
       case Some(referencedSchema) =>
         if (p.referenceResolver.isInternal(referencedSchema.uri)) {
@@ -301,6 +303,7 @@ object SchemaReader {
   def deepDereference(json: JsObject, referenceResolver: SchemaReferenceResolver): JsObject =
     (json \ "$ref")
       .asOpt[String]
+      .map(ref => referenceResolver.resolveUri(URI.create(ref)))
       .flatMap(referenceResolver.lookupJson)
       .map {
         case (json2: JsObject, resolver) =>
@@ -464,7 +467,10 @@ object SchemaReader {
             .map(_._1)
             .distinct
             .map(name => {
-              val uri = SchemaReferenceResolver.pathToUri(name :: propertyName :: path)
+              val uri: URI = {
+                val reference = SchemaReferenceResolver.pathToReference(name :: propertyName :: path)
+                referenceResolver.resolveUri(URI.create(reference))
+              }
               val path2 = referenceResolver.uriToPath(uri)
               referenceResolver
                 .lookupSchema(uri, readSchema(_, path2, _, description, Seq.empty, _))

@@ -43,7 +43,7 @@ sealed trait Schema {
   val boolean: Boolean = false
   def required: Boolean = attributes.required
 
-  val uri: String = SchemaReferenceResolver.pathToUri(path)
+  val uri: String = SchemaReferenceResolver.pathToReference(path)
 }
 
 case class SchemaAttributes(

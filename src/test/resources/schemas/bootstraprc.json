@@ -2,7 +2,6 @@
   "$schema": "http://json-schema.org/draft-04/schema#",
   "title": "JSON schema for Webpack's bootstrap-loader configuration file",
   "type": "object",
-
   "definitions": {
     "extractStyling": {
       "type": "object",
@@ -14,10 +13,8 @@
         }
       }
     },
-
     "coreProperties": {
       "type": "object",
-
       "properties": {
         "appStyles": {
           "description": "Import your custom styles here. Usually this endpoint file contains a list of @imports of your application styles.",
@@ -30,12 +27,17 @@
         "bootstrapVersion": {
           "default": 3,
           "description": "The major version of Bootstrap being used",
-          "enum": [ 3, 4 ],
+          "enum": [
+            3,
+            4
+          ],
           "type": "integer"
         },
         "loglevel": {
           "description": "The verbosity of logging. Exclude this property to disable.",
-          "enum": [ "debug" ],
+          "enum": [
+            "debug"
+          ],
           "type": "string"
         },
         "preBootstrapCustomizations": {
@@ -44,10 +46,17 @@
         },
         "scripts": {
           "description": "Excludes/includes Bootstrap's JavaScript modules",
-          "type": [ "boolean", "object" ]
+          "type": [
+            "boolean",
+            "object"
+          ]
         },
         "styleLoaders": {
-          "default": [ "style", "css", "sass" ],
+          "default": [
+            "style",
+            "css",
+            "sass"
+          ],
           "description": "An array of Webpack loader names. Order matters, and sass-loader is required.",
           "items": {
             "type": "string"
@@ -58,7 +67,10 @@
         },
         "styles": {
           "description": "Excludes/includes Bootstrap's CSS modules",
-          "type": [ "boolean", "object" ]
+          "type": [
+            "boolean",
+            "object"
+          ]
         },
         "useCustomIconFontPath": {
           "default": false,
@@ -73,7 +85,6 @@
       }
     }
   },
-
   "allOf": [
     {
       "$ref": "#/definitions/coreProperties"
@@ -97,9 +108,11 @@
           },
           "not": {
             "properties": {
-              "extractStyles": { }
+              "extractStyles": {}
             },
-            "required": [ "extractStyles" ]
+            "required": [
+              "extractStyles"
+            ]
           }
         },
         {
@@ -110,15 +123,20 @@
           },
           "not": {
             "properties": {
-              "env": { }
+              "env": {}
             },
-            "required": [ "env" ]
+            "required": [
+              "env"
+            ]
           }
         }
       ]
     },
     {
-      "required": [ "bootstrapVersion", "styleLoaders" ]
+      "required": [
+        "bootstrapVersion",
+        "styleLoaders"
+      ]
     }
   ]
 }
