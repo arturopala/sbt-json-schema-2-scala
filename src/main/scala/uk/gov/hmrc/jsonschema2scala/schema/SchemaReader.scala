@@ -115,7 +115,9 @@ object SchemaReader {
           throw new IllegalStateException(s"Unsupported schema feature(s): ${ks.mkString("|")}.")
         } else {
           // fallback to read implicit object schema
-          readObjectSchema(p.copy(json = JsObject(Seq(Keywords.properties -> json))))
+          val keywords = json.fields.filter(f => Vocabulary.allKeywords.contains(f._1))
+          val properties = json.fields.filterNot(f => Vocabulary.allKeywords.contains(f._1))
+          readObjectSchema(p.copy(json = JsObject(keywords ++ Seq(Keywords.properties -> JsObject(properties)))))
         }
       }
   }
@@ -354,25 +356,24 @@ object SchemaReader {
   def attemptReadProperties(p: Parameters): Option[Seq[Schema]] =
     (p.json \ "properties")
       .asOpt[JsObject]
-      .map(
-        properties =>
-          properties.fields
-            .map(_._1)
-            .distinct
-            .map(name => {
-              (properties \ name).as[JsValue] match {
-                case fieldProperty: JsObject =>
-                  readSchema(
-                    name = name,
-                    currentPath = name :: "properties" :: p.path,
-                    json = fieldProperty,
-                    requiredFields = p.requiredFields,
-                    currentReferenceResolver = p.referenceResolver)
-                case other =>
-                  throw new IllegalStateException(s"Invalid object schema, expected ${p.path.reverse
-                    .mkString("/")}/$name to be an object, but got ${other.getClass.getSimpleName}")
-              }
-            }))
+      .map(properties =>
+        properties.fields
+          .map(_._1)
+          .distinct
+          .map(name => {
+            (properties \ name).as[JsValue] match {
+              case fieldProperty: JsObject =>
+                readSchema(
+                  name = name,
+                  currentPath = name :: "properties" :: p.path,
+                  json = fieldProperty,
+                  requiredFields = p.requiredFields,
+                  currentReferenceResolver = p.referenceResolver)
+              case other =>
+                throw new IllegalStateException(
+                  s"Invalid object schema, expected property '$name' to be an object, but got ${other.getClass.getSimpleName} at ${p.currentUri}")
+            }
+          }))
 
   def attemptReadPatternProperties(p: Parameters): Option[Seq[Schema]] =
     (p.json \ "patternProperties")
@@ -447,7 +448,8 @@ object SchemaReader {
           throw new IllegalStateException("Unsupported feature, array with items of an array shape")
 
         case other =>
-          throw new IllegalStateException(s"Invalid schema, expected object or an array, but got $other")
+          throw new IllegalStateException(
+            s"Invalid schema, expected object or an array, but got $other at ${p.currentUri}")
       })
 
     ArraySchema(p.a, itemDefinition, minItems, maxItems, uniqueItems, minContains, maxContains)
