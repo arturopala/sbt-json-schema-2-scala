@@ -97,7 +97,6 @@ trait TestSchemas {
     "chrome-manifest.json",
     "chutzpah.json",
     "circleciconfig.json",
-    "cirrus.json",
     "clasp.json",
     "cloud-sdk-pipeline-config-schema.json",
     "cloudbuild.json",

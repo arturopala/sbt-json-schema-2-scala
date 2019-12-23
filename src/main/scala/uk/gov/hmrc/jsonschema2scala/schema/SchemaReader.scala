@@ -435,17 +435,32 @@ object SchemaReader {
      */
     val itemDefinition = (p.json \ "items")
       .asOpt[JsValue]
-      .map({
+      .flatMap({
         case itemSchema: JsObject =>
-          readSchema(
-            NameUtils.singular(p.name),
-            "items" :: p.path,
-            itemSchema,
-            requiredFields = Seq(p.name),
-            currentReferenceResolver = p.referenceResolver)
+          Some(
+            readSchema(
+              NameUtils.singular(p.name),
+              "items" :: p.path,
+              itemSchema,
+              requiredFields = Seq(p.name),
+              currentReferenceResolver = p.referenceResolver))
 
-        case _: JsArray =>
-          throw new IllegalStateException("Unsupported feature, array with items of an array shape")
+        case array: JsArray =>
+          array.value.toList match {
+            case Nil => None
+            case (json: JsObject) :: Nil =>
+              Some(
+                readSchema(
+                  NameUtils.singular(p.name),
+                  "0" :: "items" :: p.path,
+                  json,
+                  requiredFields = Seq(p.name),
+                  currentReferenceResolver = p.referenceResolver))
+            case other =>
+              throw new IllegalStateException(
+                s"Unsupported feature, array schema with items of an array shape with multiple items ${other
+                  .mkString("[", ",", "]")} at ${p.currentUri}")
+          }
 
         case other =>
           throw new IllegalStateException(
@@ -576,16 +591,33 @@ object SchemaReader {
         (p.json \ "const").asOpt[JsValue].map(Seq(_))
       )
       .flatMap(emptyAsNone)
-      .map(enum =>
-        enum match {
-          case (_: JsString) :: _  => StringSchema(p.a, enum = Some(enum.map(_.as[String])))
-          case (_: JsNumber) :: _  => NumberSchema(p.a, enum = Some(enum.map(_.as[BigDecimal])))
-          case (_: JsBoolean) :: _ => BooleanSchema(p.a, enum = Some(enum.map(_.as[Boolean])))
-          case (_: JsArray) :: _   => ArraySchema(p.a)
-          case other =>
-            throw new IllegalStateException(
-              s"Unsupported feature, enum of ${other.mkString("[", ",", "]")} at ${p.currentUri}")
-      })
+      .map { enum =>
+        val types = enum.groupBy(_.getClass.getSimpleName).values.toSeq
+        types.size match {
+          case 1 =>
+            enum.head match {
+              case _: JsString  => StringSchema(p.a, enum = Some(enum.map(_.as[String])))
+              case _: JsNumber  => NumberSchema(p.a, enum = Some(enum.map(_.as[BigDecimal])))
+              case _: JsBoolean => BooleanSchema(p.a, enum = Some(enum.map(_.as[Boolean])))
+              case _: JsArray   => ArraySchema(p.a)
+              case other =>
+                throw new IllegalStateException(s"Unsupported feature, enum of [$other] at ${p.currentUri}")
+            }
+          case _ =>
+            val variants = types.map {
+              case xs @ ((_: JsString) :: _)  => StringSchema(p.a, enum = Some(xs.map(_.as[String])))
+              case xs @ ((_: JsNumber) :: _)  => NumberSchema(p.a, enum = Some(xs.map(_.as[BigDecimal])))
+              case xs @ ((_: JsBoolean) :: _) => BooleanSchema(p.a, enum = Some(xs.map(_.as[Boolean])))
+              case xs @ ((_: JsArray) :: _) =>
+                throw new IllegalStateException(
+                  s"Unsupported feature, enum of array of arrays ${xs.mkString("[", ",", "]")} at ${p.currentUri}")
+              case other =>
+                throw new IllegalStateException(
+                  s"Unsupported feature, enum of ${other.mkString("[", ",", "]")} at ${p.currentUri}")
+            }
+            OneOfAnyOfSchema(p.a, variants, Seq.empty, isOneOf = true)
+        }
+      }
 
   def decideResolverAndPath(
     name: String,
