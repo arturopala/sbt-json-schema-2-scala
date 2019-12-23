@@ -44,9 +44,11 @@ class ScalaCodeGeneratorMoreSpec
     compiler.cleanup()
 
   "JsonSchema2ScalaCodeRenderer" should {
-    unverifiedTestSchemas.foreach { schema: SchemaSource =>
-      s"generate from ${schema.name}" in assertCanParseAndCompile(schema, unverifiedTestSchemas)
-    }
+    unverifiedTestSchemas
+    //.filter(_.name.startsWith("feed"))
+      .foreach { schema: SchemaSource =>
+        s"generate from ${schema.name}" in assertCanParseAndCompile(schema, unverifiedTestSchemas)
+      }
   }
 
 }
