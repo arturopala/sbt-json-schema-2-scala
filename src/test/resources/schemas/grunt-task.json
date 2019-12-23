@@ -1,7 +1,7 @@
 {
 	"title": "JSON schema for any Grunt task",
 	"$schema": "http://json-schema.org/draft-04/schema#",
-
+	"$id": "http://json.schemastore.org/grunt-task#",
 	"type": "object",
 
 	"definitions": {
