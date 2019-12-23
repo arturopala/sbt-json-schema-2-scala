@@ -149,7 +149,7 @@ case class NullSchema(attributes: SchemaAttributes) extends Schema {
 
 case class ArraySchema(
   attributes: SchemaAttributes,
-  item: Option[Schema] = None,
+  items: Option[Seq[Schema]] = None,
   minItems: Option[Int] = None,
   maxItems: Option[Int] = None,
   uniqueItems: Option[Boolean] = None,
@@ -158,7 +158,10 @@ case class ArraySchema(
     extends Schema {
 
   override val primitive: Boolean = false
-  override val validated: Boolean = item.exists(_.validated) || minItems.isDefined || maxItems.isDefined
+  override val validated: Boolean =
+    items.exists(_.exists(_.validated)) || minItems.isDefined || maxItems.isDefined
+
+  def allItemsPrimitive: Boolean = items.forall(_.forall(_.primitive))
 }
 
 case class InternalSchemaReference(

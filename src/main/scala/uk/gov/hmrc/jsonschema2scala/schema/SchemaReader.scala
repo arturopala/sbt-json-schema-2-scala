@@ -434,33 +434,36 @@ object SchemaReader {
       9.3.1.1. items
       The value of "items" MUST be either a valid JSON Schema or an array of valid JSON Schemas.
      */
-    val itemDefinition = (p.json \ "items")
+    val items: Option[Seq[Schema]] = (p.json \ "items")
       .asOpt[JsValue]
       .flatMap({
         case itemSchema: JsObject =>
           Some(
-            readSchema(
-              NameUtils.singular(p.name),
-              "items" :: p.path,
-              itemSchema,
-              requiredFields = Seq(p.name),
-              currentReferenceResolver = p.referenceResolver))
+            Seq(
+              readSchema(
+                NameUtils.singular(p.name),
+                "items" :: p.path,
+                itemSchema,
+                requiredFields = Seq(p.name),
+                currentReferenceResolver = p.referenceResolver)))
 
         case array: JsArray =>
           array.value.toList match {
             case Nil => None
-            case (json: JsObject) :: Nil =>
-              Some(
-                readSchema(
-                  NameUtils.singular(p.name),
-                  "0" :: "items" :: p.path,
-                  json,
-                  requiredFields = Seq(p.name),
-                  currentReferenceResolver = p.referenceResolver))
-            case other =>
-              throw new IllegalStateException(
-                s"Unsupported feature, array schema with items of an array shape with multiple items ${other
-                  .mkString("[", ",", "]")} at ${p.currentUri}")
+            case many =>
+              Some(many map {
+                case json: JsObject =>
+                  readSchema(
+                    NameUtils.singular(p.name),
+                    "0" :: "items" :: p.path,
+                    json,
+                    requiredFields = Seq(p.name),
+                    currentReferenceResolver = p.referenceResolver)
+
+                case other =>
+                  throw new IllegalStateException(
+                    s"Invalid schema, expected array schema item to be an object, but got $other at ${p.currentUri}")
+              })
           }
 
         case other =>
@@ -468,7 +471,7 @@ object SchemaReader {
             s"Invalid schema, expected object or an array, but got $other at ${p.currentUri}")
       })
 
-    ArraySchema(p.a, itemDefinition, minItems, maxItems, uniqueItems, minContains, maxContains)
+    ArraySchema(p.a, items, minItems, maxItems, uniqueItems, minContains, maxContains)
   }
 
   def readDefinitions(
@@ -597,6 +600,7 @@ object SchemaReader {
         types.size match {
           case 1 =>
             enum.head match {
+              case JsNull       => NullSchema(p.a)
               case _: JsString  => StringSchema(p.a, enum = Some(enum.map(_.as[String])))
               case _: JsNumber  => NumberSchema(p.a, enum = Some(enum.map(_.as[BigDecimal])))
               case _: JsBoolean => BooleanSchema(p.a, enum = Some(enum.map(_.as[Boolean])))
@@ -606,6 +610,7 @@ object SchemaReader {
             }
           case _ =>
             val variants = types.map {
+              case (JsNull :: _)              => NullSchema(p.a)
               case xs @ ((_: JsString) :: _)  => StringSchema(p.a, enum = Some(xs.map(_.as[String])))
               case xs @ ((_: JsNumber) :: _)  => NumberSchema(p.a, enum = Some(xs.map(_.as[BigDecimal])))
               case xs @ ((_: JsBoolean) :: _) => BooleanSchema(p.a, enum = Some(xs.map(_.as[Boolean])))

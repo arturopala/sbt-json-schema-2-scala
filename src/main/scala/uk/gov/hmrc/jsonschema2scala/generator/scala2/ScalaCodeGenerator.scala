@@ -391,8 +391,11 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
 
         case b: BooleanSchema => "Generator.booleanGen"
         case a: ArraySchema =>
-          s"Generator.nonEmptyListOfMaxN(1,${a.item
-            .map(item => generateValueGenerator(hostType, item, context, false))
+          s"Generator.nonEmptyListOfMaxN(1,${a.items
+            .map {
+              case item :: Nil => generateValueGenerator(hostType, item, context, false)
+              case _           => "???" //FIXME add multi-item array support
+            }
             .getOrElse("Gen.chooseNum(1, 1000)")})"
         case o: ObjectSchema => s"${typeNameProvider.toTypeName(o)}.gen"
 
@@ -507,10 +510,10 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
         }
 
       case a: ArraySchema =>
-        val itemValidator: Option[String] = (a.item match {
-          case Some(o: ObjectSchema) => Some(s"""${typeNameProvider.toTypeName(o)}.validate""")
-          case Some(x)               => generateValueValidator(x, context)
-          case None                  => None
+        val itemValidator: Option[String] = (a.items match {
+          case Some((o: ObjectSchema) :: Nil) => Some(s"""${typeNameProvider.toTypeName(o)}.validate""")
+          case Some(x :: Nil)                 => generateValueValidator(x, context)
+          case _                              => None //FIXME add multi-item array support
         }).map(vv =>
           if (property.required || isMandatory) s""" checkEach($propertyExtractor, $vv)"""
           else s"""  checkEachIfSome($propertyExtractor, $vv)""")
@@ -592,9 +595,9 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
                                 case o: ObjectSchema =>
                                   s"${typeNameProvider.toTypeName(o)}.sanitize(seed)(entity.${typeNameProvider
                                     .toIdentifier(schema.name)})"
-                                case a: ArraySchema if !a.item.forall(_.primitive) =>
+                                case a: ArraySchema if !a.allItemsPrimitive =>
                                   s"entity.${typeNameProvider.toIdentifier(schema.name)}.map(item => ${typeNameProvider
-                                    .toTypeName(a.item.get)}.sanitize(seed)(item))"
+                                    .toTypeName(a.items.get.head)}.sanitize(seed)(item))"
                                 case o: OneOfAnyOfSchema if o.variants.nonEmpty && !o.variants.head.primitive =>
                                   if (o.variants.size == 1)
                                     s"${typeNameProvider.toTypeName(o.variants.head)}.sanitize(seed)(entity.${typeNameProvider
@@ -729,7 +732,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
     schema: Schema)(implicit typeResolver: TypeResolver, typeNameProvider: TypeNameProvider): String =
     schema match {
       case a: ArraySchema =>
-        s".map(_.map(${a.item.map(typeNameProvider.toTypeName).getOrElse(typeResolver.any)}.sanitize(seed)))"
+        s".map(_.map(${a.items.map(items => typeNameProvider.toTypeName(items.head)).getOrElse(typeResolver.any)}.sanitize(seed)))"
       case o: ObjectSchema => s".map(${typeNameProvider.toTypeName(o)}.sanitize(seed))"
       case o: OneOfAnyOfSchema =>
         if (o.variants.isEmpty) ""

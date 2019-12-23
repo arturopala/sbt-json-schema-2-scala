@@ -28,7 +28,7 @@ object SchemaUtils {
         s.patternProperties.flatMap(listSchemaUriToSchema)
       case s: OneOfAnyOfSchema =>
         s.variants.flatMap(listSchemaUriToSchema)
-      case arraySchema: ArraySchema => arraySchema.item.map(listSchemaUriToSchema).getOrElse(Seq.empty)
+      case arraySchema: ArraySchema => arraySchema.items.map(_.flatMap(listSchemaUriToSchema)).getOrElse(Seq.empty)
       case _                        => Seq.empty
     })
 

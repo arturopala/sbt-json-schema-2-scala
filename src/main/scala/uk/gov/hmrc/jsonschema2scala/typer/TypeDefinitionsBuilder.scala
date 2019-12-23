@@ -201,8 +201,8 @@ object TypeDefinitionsBuilder {
 
   def processArraySchema(name: String, path: List[String], arraySchema: ArraySchema)(
     implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] =
-    arraySchema.item.toSeq
-      .flatMap(item => processSchema(typeNameProvider.toTypeName(item), path, item))
+    arraySchema.items.toSeq
+      .flatMap(_.flatMap(item => processSchema(typeNameProvider.toTypeName(item), path, item)))
 
   def processMapSchema(name: String, path: List[String], mapSchema: MapSchema)(
     implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] = {
@@ -226,8 +226,8 @@ object TypeDefinitionsBuilder {
       case o: ObjectSchema => calculateExternalImports(o)
       case oneOf: OneOfAnyOfSchema if oneOf.variants.collect { case _: ObjectSchema => }.nonEmpty =>
         oneOf.variants.collect { case o: ObjectSchema => o }.flatMap(calculateExternalImports)
-      case a: ArraySchema if a.item.exists(_.isInstanceOf[ExternalSchemaReference]) =>
-        Set(typeNameProvider.toTypeName(a.item.asInstanceOf[ObjectSchema]))
+      case a: ArraySchema if a.items.exists(_.isInstanceOf[ExternalSchemaReference]) =>
+        Set(typeNameProvider.toTypeName(a.items.asInstanceOf[ObjectSchema]))
       case e: ExternalSchemaReference if !e.primitive =>
         Set(typeNameProvider.toTypeName(e))
       case _ => Set()

@@ -48,8 +48,17 @@ class ScalaTypeResolver(
         else s"Map[String,$any]"
 
       case arraySchema: ArraySchema =>
-        arraySchema.item
-          .map(item => s"Seq[${typeOf(item, viewpoint, wrapAsOption = false, showDefaultValue = false)}]")
+        arraySchema.items
+          .map {
+            case item :: Nil => s"Seq[${typeOf(item, viewpoint, wrapAsOption = false, showDefaultValue = false)}]"
+            case many =>
+              many.map(_.getClass.getSimpleName).distinct.toList match {
+                case "JsObject" :: Nil => s"Seq[AnyRef]"
+                case _ :: Nil          => s"Seq[${typeOf(many.head, viewpoint, wrapAsOption = false, showDefaultValue = false)}]"
+                case _                 => s"Seq[$any]"
+              }
+
+          }
           .getOrElse(s"Seq[$any]")
 
       case oneOfSchema: OneOfAnyOfSchema =>
