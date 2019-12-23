@@ -114,10 +114,11 @@ object SchemaReader {
         if (ks.nonEmpty) {
           throw new IllegalStateException(s"Unsupported schema feature(s): ${ks.mkString("|")}.")
         } else {
-          // fallback to read implicit object schema
-          val keywords = json.fields.filter(f => Vocabulary.allKeywords.contains(f._1))
-          val properties = json.fields.filterNot(f => Vocabulary.allKeywords.contains(f._1))
-          readObjectSchema(p.copy(json = JsObject(keywords ++ Seq(Keywords.properties -> JsObject(properties)))))
+          // fallback to an empty object schema
+          ObjectSchema(
+            attributes = p.a,
+            requiredFields = p.requiredFields
+          )
         }
       }
   }
