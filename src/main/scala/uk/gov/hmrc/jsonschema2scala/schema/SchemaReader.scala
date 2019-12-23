@@ -78,49 +78,63 @@ object SchemaReader {
   def readSchema(
     name: String,
     currentPath: List[String],
-    json: JsObject,
+    value: JsValue,
     externalDescription: Option[String] = None,
     requiredFields: Seq[String],
-    currentReferenceResolver: SchemaReferenceResolver): Schema = {
+    currentReferenceResolver: SchemaReferenceResolver): Schema = value match {
 
-    val isMandatory = requiredFields.contains(name)
+    case boolean: JsBoolean =>
+      boolean.value match {
+        case true =>
+          ObjectSchema(SchemaAttributes(name, currentPath, None, Seq.empty, false, None))
 
-    val id: Option[URI] = attemptReadId(json)
-
-    val (referenceResolver, path) =
-      decideResolverAndPath(name, currentPath, json, currentReferenceResolver, id)
-
-    val description: Option[String] = externalDescription.orElse(attemptReadDescription(json))
-
-    val definitions: Seq[Schema] = readDefinitions("definitions", name, path, json, description, referenceResolver) ++
-      readDefinitions("$defs", name, path, json, description, referenceResolver)
-
-    val custom: Option[Map[String, JsValue]] = {
-      val set = keywordsNotInVocabulary(json.fields)
-      if (set.isEmpty) None else Some(set.map(k => (k, (json \ k).as[JsValue])).toMap)
-    }
-
-    val p =
-      Parameters(name, path, description, definitions, isMandatory, custom, json, requiredFields, referenceResolver)
-
-    attemptReadExplicitType(p)
-      .orElse { attemptReadReference(p) }
-      .orElse { attemptReadOneOf(p) }
-      .orElse { attemptReadAnyOf(p) }
-      .orElse { attemptReadAllOf(p) }
-      .orElse { attemptReadImplicitType(p) }
-      .getOrElse {
-        val ks = keywordsInVocabularyNotMeta(json.fields)
-        if (ks.nonEmpty) {
-          throw new IllegalStateException(s"Unsupported schema feature(s): ${ks.mkString("|")}.")
-        } else {
-          // fallback to an empty object schema
-          ObjectSchema(
-            attributes = p.a,
-            requiredFields = p.requiredFields
-          )
-        }
+        case false =>
+          //FIXME add handling of NOT when implemented
+          ObjectSchema(SchemaAttributes(name, currentPath, None, Seq.empty, false, None))
       }
+
+    case json: JsObject =>
+      val isMandatory = requiredFields.contains(name)
+
+      val id: Option[URI] = attemptReadId(json)
+
+      val (referenceResolver, path) =
+        decideResolverAndPath(name, currentPath, json, currentReferenceResolver, id)
+
+      val description: Option[String] = externalDescription.orElse(attemptReadDescription(json))
+
+      val definitions: Seq[Schema] = readDefinitions("definitions", name, path, json, description, referenceResolver) ++
+        readDefinitions("$defs", name, path, json, description, referenceResolver)
+
+      val custom: Option[Map[String, JsValue]] = {
+        val set = keywordsNotInVocabulary(json.fields)
+        if (set.isEmpty) None else Some(set.map(k => (k, (json \ k).as[JsValue])).toMap)
+      }
+
+      val p =
+        Parameters(name, path, description, definitions, isMandatory, custom, json, requiredFields, referenceResolver)
+
+      attemptReadExplicitType(p)
+        .orElse { attemptReadReference(p) }
+        .orElse { attemptReadOneOf(p) }
+        .orElse { attemptReadAnyOf(p) }
+        .orElse { attemptReadAllOf(p) }
+        .orElse { attemptReadImplicitType(p) }
+        .getOrElse {
+          val ks = keywordsInVocabularyNotMeta(json.fields)
+          if (ks.nonEmpty) {
+            throw new IllegalStateException(s"Unsupported schema feature(s): ${ks.mkString("|")}.")
+          } else {
+            // fallback to an empty object schema
+            ObjectSchema(
+              attributes = p.a,
+              requiredFields = p.requiredFields
+            )
+          }
+        }
+
+    case other =>
+      throw new IllegalStateException(s"Invalid schema, expected an object or boolean but got $other at $currentPath")
   }
 
   def attemptReadId(json: JsObject): Option[URI] =
@@ -367,40 +381,58 @@ object SchemaReader {
                 readSchema(
                   name = name,
                   currentPath = name :: "properties" :: p.path,
-                  json = fieldProperty,
+                  value = fieldProperty,
                   requiredFields = p.requiredFields,
                   currentReferenceResolver = p.referenceResolver)
+
+              case boolean: JsBoolean =>
+                readSchema(
+                  name = name,
+                  currentPath = name :: "properties" :: p.path,
+                  value = boolean,
+                  requiredFields = p.requiredFields,
+                  currentReferenceResolver = p.referenceResolver)
+
               case other =>
                 throw new IllegalStateException(
-                  s"Invalid object schema, expected property '$name' to be an object, but got ${other.getClass.getSimpleName} at ${p.currentUri}")
+                  s"Invalid object schema, expected property '$name' to be an object or boolean, but got ${other.getClass.getSimpleName} at ${p.currentUri}")
             }
           }))
 
   def attemptReadPatternProperties(p: Parameters): Option[Seq[Schema]] =
     (p.json \ "patternProperties")
       .asOpt[JsObject]
-      .map(
-        patternProperties =>
-          patternProperties.fields
-            .map(_._1)
-            .distinct
-            .map { pattern =>
-              {
-                (patternProperties \ pattern).as[JsValue] match {
-                  case fieldProperty: JsObject =>
-                    readSchema(
-                      name = pattern,
-                      currentPath = pattern :: "patternProperties" :: p.path,
-                      json = fieldProperty,
-                      requiredFields = p.requiredFields,
-                      currentReferenceResolver = p.referenceResolver
-                    )
-                  case other =>
-                    throw new IllegalStateException(s"Invalid object schema, expected ${p.path.reverse
-                      .mkString("/")}/$pattern to be an object, but got ${other.getClass.getSimpleName}")
-                }
+      .map(patternProperties =>
+        patternProperties.fields
+          .map(_._1)
+          .distinct
+          .map { pattern =>
+            {
+              (patternProperties \ pattern).as[JsValue] match {
+                case fieldProperty: JsObject =>
+                  readSchema(
+                    name = pattern,
+                    currentPath = pattern :: "patternProperties" :: p.path,
+                    value = fieldProperty,
+                    requiredFields = p.requiredFields,
+                    currentReferenceResolver = p.referenceResolver
+                  )
+
+                case boolean: JsBoolean =>
+                  readSchema(
+                    name = pattern,
+                    currentPath = pattern :: "patternProperties" :: p.path,
+                    value = boolean,
+                    requiredFields = p.requiredFields,
+                    currentReferenceResolver = p.referenceResolver
+                  )
+
+                case other =>
+                  throw new IllegalStateException(
+                    s"Invalid object schema, expected '$pattern' to be an object, but got ${other.getClass.getSimpleName} at ${p.currentUri}")
               }
-          })
+            }
+        })
 
   def attemptReadAdditionalProperties(p: Parameters): Option[Seq[Schema]] =
     (p.json \ "additionalProperties")
@@ -410,7 +442,7 @@ object SchemaReader {
           readSchema(
             name = p.name,
             currentPath = "additionalProperties" :: p.path,
-            json = property,
+            value = property,
             requiredFields = p.requiredFields,
             currentReferenceResolver = p.referenceResolver))
           .map {
