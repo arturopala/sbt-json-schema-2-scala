@@ -160,7 +160,7 @@ object SchemaReader {
       case "string"  => readStringSchema(p)
       case "number"  => readNumberSchema(p)
       case "integer" => readIntegerSchema(p)
-      case "boolean" => BooleanSchema(p.a)
+      case "boolean" => readBooleanSchema(p)
       case "object"  => readObjectSchema(p)
       case "array"   => readArraySchema(p)
       case "null"    => readObjectSchema(p)
@@ -501,15 +501,17 @@ object SchemaReader {
     val pattern = (p.json \ "pattern").asOpt[String]
     val minLength = (p.json \ "minLength").asOpt[Int]
     val maxLength = (p.json \ "maxLength").asOpt[Int]
+    val enum = readEnum[String](p)
 
-    val enum = (p.json \ "enum")
-      .asOpt[Seq[String]]
-      .orElse(
-        (p.json \ "const").asOpt[String].map(Seq(_))
-      )
-
-    StringSchema(p.a, pattern, enum, minLength, maxLength)
+    StringSchema(p.a, pattern, minLength, maxLength, enum)
   }
+
+  def readEnum[T: Reads](p: Parameters): Option[Seq[T]] =
+    (p.json \ "enum")
+      .asOpt[Seq[T]]
+      .orElse(
+        (p.json \ "const").asOpt[T].map(Seq(_))
+      )
 
   def readNumberSchema(p: Parameters): NumberSchema = {
 
@@ -518,8 +520,9 @@ object SchemaReader {
     val exclusiveMinimum = (p.json \ "exclusiveMinimum").asOpt[BigDecimal]
     val exclusiveMaximum = (p.json \ "exclusiveMaximum").asOpt[BigDecimal]
     val multipleOf = (p.json \ "multipleOf").asOpt[BigDecimal]
+    val enum = readEnum[BigDecimal](p)
 
-    NumberSchema(p.a, minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf)
+    NumberSchema(p.a, minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf, enum)
   }
 
   def readIntegerSchema(p: Parameters): IntegerSchema = {
@@ -529,8 +532,16 @@ object SchemaReader {
     val exclusiveMinimum = (p.json \ "exclusiveMinimum").asOpt[Int]
     val exclusiveMaximum = (p.json \ "exclusiveMaximum").asOpt[Int]
     val multipleOf = (p.json \ "multipleOf").asOpt[Int]
+    val enum = readEnum[Int](p)
 
-    IntegerSchema(p.a, minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf)
+    IntegerSchema(p.a, minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf, enum)
+  }
+
+  def readBooleanSchema(p: Parameters): BooleanSchema = {
+
+    val enum = readEnum[Boolean](p)
+
+    BooleanSchema(p.a, enum)
   }
 
   final val implicitReaders: Seq[(Set[String], Parameters => Schema)] = Seq(
@@ -552,21 +563,27 @@ object SchemaReader {
         case (a, (v, r)) => a.orElse(if (isKeywordIn(v)(fields)) Some(r(p)) else None)
       }
       .orElse {
-        (p.json \ "enum")
-          .asOpt[Seq[JsValue]]
-          .orElse(
-            (p.json \ "const").asOpt[JsValue].map(Seq(_))
-          )
-          .flatMap(emptyAsNone)
-          .map(enum =>
-            enum match {
-              case (_: JsString) :: _ => readStringSchema(p)
-              case (_: JsNumber) :: _ => NumberSchema(p.a)
-              case (_: JsArray) :: _  => ArraySchema(p.a)
-              case other              => throw new IllegalStateException(s"Unsupported feature, enum of $other")
-          })
+        attemptReadEnumOrConst(p)
       }
   }
+
+  def attemptReadEnumOrConst(p: Parameters): Option[Schema] =
+    (p.json \ "enum")
+      .asOpt[Seq[JsValue]]
+      .orElse(
+        (p.json \ "const").asOpt[JsValue].map(Seq(_))
+      )
+      .flatMap(emptyAsNone)
+      .map(enum =>
+        enum match {
+          case (_: JsString) :: _  => StringSchema(p.a, enum = Some(enum.map(_.as[String])))
+          case (_: JsNumber) :: _  => NumberSchema(p.a, enum = Some(enum.map(_.as[BigDecimal])))
+          case (_: JsBoolean) :: _ => BooleanSchema(p.a, enum = Some(enum.map(_.as[Boolean])))
+          case (_: JsArray) :: _   => ArraySchema(p.a)
+          case other =>
+            throw new IllegalStateException(
+              s"Unsupported feature, enum of ${other.mkString("[", ",", "]")} at ${p.currentUri}")
+      })
 
   def decideResolverAndPath(
     name: String,

@@ -96,9 +96,9 @@ case class OneOfAnyOfSchema(
 case class StringSchema(
   attributes: SchemaAttributes,
   pattern: Option[String] = None,
-  enum: Option[Seq[String]] = None,
   minLength: Option[Int] = None,
-  maxLength: Option[Int] = None)
+  maxLength: Option[Int] = None,
+  enum: Option[Seq[String]] = None)
     extends Schema {
 
   override val primitive: Boolean = true
@@ -112,7 +112,8 @@ case class NumberSchema(
   maximum: Option[BigDecimal] = None,
   exclusiveMinimum: Option[BigDecimal] = None,
   exclusiveMaximum: Option[BigDecimal] = None,
-  multipleOf: Option[BigDecimal] = None
+  multipleOf: Option[BigDecimal] = None,
+  enum: Option[Seq[BigDecimal]] = None
 ) extends Schema {
 
   override val primitive: Boolean = true
@@ -125,14 +126,15 @@ case class IntegerSchema(
   maximum: Option[Int] = None,
   exclusiveMinimum: Option[Int] = None,
   exclusiveMaximum: Option[Int] = None,
-  multipleOf: Option[Int] = None
+  multipleOf: Option[Int] = None,
+  enum: Option[Seq[Int]] = None
 ) extends Schema {
 
   override val primitive: Boolean = true
   override val validated: Boolean = minimum.isDefined || maximum.isDefined || multipleOf.isDefined
 }
 
-case class BooleanSchema(attributes: SchemaAttributes) extends Schema {
+case class BooleanSchema(attributes: SchemaAttributes, enum: Option[Seq[Boolean]] = None) extends Schema {
   override val primitive: Boolean = true
   override val boolean: Boolean = true
   override val validated: Boolean = false

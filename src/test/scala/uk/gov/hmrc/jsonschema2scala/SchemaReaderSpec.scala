@@ -39,7 +39,7 @@ class SchemaReaderSpec extends WordSpec with Matchers with TestSchemas {
 
   "SchemaReader" should {
     allSchemas
-    //.filter(_.name.startsWith("cryproj"))
+    //.filter(_.name.startsWith("appveyor"))
       .foreach { schema =>
         s"read ${schema.name} schema" in {
           val json = schema.json.fold(throw _, identity)
