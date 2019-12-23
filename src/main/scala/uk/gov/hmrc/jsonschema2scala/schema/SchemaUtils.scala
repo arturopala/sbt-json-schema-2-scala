@@ -44,6 +44,8 @@ object SchemaUtils {
         s.copy(attributes = newAttributes)
       case s: OneOfAnyOfSchema =>
         s.copy(attributes = newAttributes)
+      case s: NotSchema =>
+        s.copy(attributes = newAttributes)
       case s: StringSchema =>
         s.copy(attributes = newAttributes)
       case s: NumberSchema =>

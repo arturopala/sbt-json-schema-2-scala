@@ -55,42 +55,10 @@ case class SchemaAttributes(
   custom: Option[Map[String, JsValue]]
 )
 
-case class ObjectSchema(
-  attributes: SchemaAttributes,
-  properties: Seq[Schema] = Seq.empty,
-  requiredFields: Seq[String] = Seq.empty,
-  alternativeRequiredFields: Seq[Set[String]] = Seq.empty,
-  patternProperties: Option[Seq[Schema]] = None)
-    extends Schema {
-
-  final val primitive: Boolean = false
-  final val validated: Boolean = true
-
-  def isEmpty: Boolean = properties.isEmpty && patternProperties.isEmpty
-}
-
-case class MapSchema(
-  attributes: SchemaAttributes,
-  patternProperties: Seq[Schema] = Seq.empty,
-  requiredFields: Seq[String] = Seq.empty,
-  alternativeRequiredFields: Seq[Set[String]] = Seq.empty)
-    extends Schema {
-
-  override val primitive: Boolean = false
-  override val validated: Boolean = true
-
-  def isEmpty: Boolean = patternProperties.isEmpty
-}
-
-case class OneOfAnyOfSchema(
-  attributes: SchemaAttributes,
-  variants: Seq[Schema] = Seq.empty,
-  alternativeRequiredFields: Seq[Set[String]] = Seq.empty,
-  isOneOf: Boolean)
-    extends Schema {
-
-  override val primitive: Boolean = variants.forall(_.primitive)
-  override val validated: Boolean = variants.nonEmpty
+case class NullSchema(attributes: SchemaAttributes) extends Schema {
+  override val primitive: Boolean = true
+  override val validated: Boolean = false
+  final override val required: Boolean = false
 }
 
 case class StringSchema(
@@ -141,12 +109,6 @@ case class BooleanSchema(attributes: SchemaAttributes, enum: Option[Seq[Boolean]
   final override val required: Boolean = true
 }
 
-case class NullSchema(attributes: SchemaAttributes) extends Schema {
-  override val primitive: Boolean = true
-  override val validated: Boolean = false
-  final override val required: Boolean = false
-}
-
 case class ArraySchema(
   attributes: SchemaAttributes,
   items: Option[Seq[Schema]] = None,
@@ -162,6 +124,50 @@ case class ArraySchema(
     items.exists(_.exists(_.validated)) || minItems.isDefined || maxItems.isDefined
 
   def allItemsPrimitive: Boolean = items.forall(_.forall(_.primitive))
+}
+
+case class ObjectSchema(
+  attributes: SchemaAttributes,
+  properties: Seq[Schema] = Seq.empty,
+  requiredFields: Seq[String] = Seq.empty,
+  alternativeRequiredFields: Seq[Set[String]] = Seq.empty,
+  patternProperties: Option[Seq[Schema]] = None)
+    extends Schema {
+
+  final val primitive: Boolean = false
+  final val validated: Boolean = true
+
+  def isEmpty: Boolean = properties.isEmpty && patternProperties.isEmpty
+}
+
+case class MapSchema(
+  attributes: SchemaAttributes,
+  patternProperties: Seq[Schema] = Seq.empty,
+  requiredFields: Seq[String] = Seq.empty,
+  alternativeRequiredFields: Seq[Set[String]] = Seq.empty)
+    extends Schema {
+
+  override val primitive: Boolean = false
+  override val validated: Boolean = true
+
+  def isEmpty: Boolean = patternProperties.isEmpty
+}
+
+case class OneOfAnyOfSchema(
+  attributes: SchemaAttributes,
+  variants: Seq[Schema] = Seq.empty,
+  alternativeRequiredFields: Seq[Set[String]] = Seq.empty,
+  isOneOf: Boolean)
+    extends Schema {
+
+  override val primitive: Boolean = variants.forall(_.primitive)
+  override val validated: Boolean = variants.nonEmpty
+}
+
+case class NotSchema(attributes: SchemaAttributes, schema: Schema) extends Schema {
+
+  override val primitive: Boolean = schema.primitive
+  override val validated: Boolean = true
 }
 
 case class InternalSchemaReference(

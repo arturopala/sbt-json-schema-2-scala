@@ -89,8 +89,8 @@ object SchemaReader {
           ObjectSchema(SchemaAttributes(name, currentPath, None, Seq.empty, false, None))
 
         case false =>
-          //FIXME add handling of NOT when implemented
-          ObjectSchema(SchemaAttributes(name, currentPath, None, Seq.empty, false, None))
+          val a = SchemaAttributes(name, currentPath, None, Seq.empty, false, None)
+          NotSchema(a, ObjectSchema(a))
       }
 
     case json: JsObject =>
@@ -119,6 +119,7 @@ object SchemaReader {
         .orElse { attemptReadOneOf(p) }
         .orElse { attemptReadAnyOf(p) }
         .orElse { attemptReadAllOf(p) }
+        .orElse { attemptReadNot(p) }
         .orElse { attemptReadImplicitType(p) }
         .getOrElse {
           val ks = keywordsInVocabularyNotMeta(json.fields)
@@ -316,6 +317,15 @@ object SchemaReader {
             })
             readSchema(p.name, "allOf" :: p.path, mergedJson, p.description, p.requiredFields, p.referenceResolver)
         }
+      }
+
+  def attemptReadNot(p: Parameters): Option[Schema] =
+    (p.json \ "not")
+      .asOpt[JsObject]
+      .map { json =>
+        val schema: Schema =
+          readSchema(p.name, "not" :: p.path, json, p.description, p.requiredFields, p.referenceResolver)
+        NotSchema(p.a, schema)
       }
 
   def deepDereference(json: JsObject, referenceResolver: SchemaReferenceResolver): JsObject =
