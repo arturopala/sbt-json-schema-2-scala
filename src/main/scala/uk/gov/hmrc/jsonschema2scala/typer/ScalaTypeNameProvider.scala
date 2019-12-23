@@ -29,7 +29,11 @@ object ScalaTypeNameProvider extends TypeNameProvider {
         e.schema.name
       case s => s.name
     }
-    firstCharUppercase(normalize(name))
+    firstCharUppercase(
+      normalize(
+        if (name.endsWith(".schema.json")) name.dropRight(12)
+        else if (name.endsWith(".json")) name.dropRight(5)
+        else name))
   }
 
   override def toIdentifier(name: String): String =

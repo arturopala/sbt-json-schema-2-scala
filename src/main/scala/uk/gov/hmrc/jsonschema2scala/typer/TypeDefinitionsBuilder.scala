@@ -69,7 +69,7 @@ object TypeDefinitionsBuilder {
     val types: Seq[TypeDefinition] = schema match {
       case objectSchema: ObjectSchema        => processObjectSchema(name, path, objectSchema)
       case oneOfSchema: OneOfAnyOfSchema     => processOneOfSchema(name, path, oneOfSchema) ++ templates
-      case notSchema: NotSchema              => processSchema(name, path, notSchema) ++ templates
+      case notSchema: NotSchema              => processSchema(name, path, notSchema.schema) ++ templates
       case arraySchema: ArraySchema          => processArraySchema(name, path, arraySchema) ++ templates
       case mapSchema: MapSchema              => processMapSchema(name, path, mapSchema) ++ templates
       case external: ExternalSchemaReference => processExternalSchemaReference(name, path, external) ++ templates
