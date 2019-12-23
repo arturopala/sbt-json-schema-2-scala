@@ -29,9 +29,9 @@ trait CompilationAssertions {
   }
 
   def assertSuccessAndCompiles(
-    renderingResult: Either[List[String], (String, String, Seq[Code])],
+    generatorResult: Either[List[String], (String, String, Seq[Code])],
     assertions: Assertion[ClassLoader]*)(implicit compiler: Compiler): Unit =
-    renderingResult.fold[Unit](
+    generatorResult.fold[Unit](
       errors => fail(errors.mkString(", ")), {
         case (packageName: String, className: String, sourceCodeUnits: Seq[Code]) =>
           assertCompiles(

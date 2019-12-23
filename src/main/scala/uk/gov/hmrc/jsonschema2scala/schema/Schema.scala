@@ -44,6 +44,9 @@ sealed trait Schema {
   def required: Boolean = attributes.required
 
   val uri: String = SchemaReferenceResolver.pathToReference(path)
+
+  def withDefinitions(definitions: Seq[Schema]): Schema =
+    SchemaUtils.copyAttributes(this, attributes.copy(definitions = definitions))
 }
 
 case class SchemaAttributes(

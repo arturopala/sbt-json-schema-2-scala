@@ -35,6 +35,10 @@ object SchemaUtils {
   def copy(schema: Schema, name: String, path: List[String], description: Option[String]): Schema = {
     val newAttributes =
       schema.attributes.copy(name = name, path = path, description = description.orElse(schema.description))
+    copyAttributes(schema, newAttributes)
+  }
+
+  def copyAttributes(schema: Schema, newAttributes: SchemaAttributes): Schema =
     schema match {
       case s: ObjectSchema =>
         s.copy(attributes = newAttributes)
@@ -65,5 +69,4 @@ object SchemaUtils {
       case s: SchemaStub =>
         s.copy(attributes = newAttributes)
     }
-  }
 }

@@ -300,7 +300,16 @@ object SchemaReader {
           case 1 =>
             array.value.head match {
               case json: JsObject =>
-                readSchema(p.name, "0" :: "allOf" :: p.path, json, p.description, p.requiredFields, p.referenceResolver)
+                val schema = readSchema(
+                  p.name,
+                  "0" :: "allOf" :: p.path,
+                  json,
+                  p.description,
+                  p.requiredFields,
+                  p.referenceResolver)
+
+                schema.withDefinitions(schema.definitions ++ p.definitions)
+
               case other =>
                 throw new IllegalStateException(
                   s"Invalid schema, allOf array element must be valid schema object, but got $other")
@@ -316,7 +325,9 @@ object SchemaReader {
                   throw new IllegalStateException(
                     s"Invalid schema, allOf array element must be valid schema object, but got $other")
             })
-            readSchema(p.name, "allOf" :: p.path, mergedJson, p.description, p.requiredFields, p.referenceResolver)
+            val schema =
+              readSchema(p.name, "allOf" :: p.path, mergedJson, p.description, p.requiredFields, p.referenceResolver)
+            schema.withDefinitions(schema.definitions ++ p.definitions)
         }
       }
 

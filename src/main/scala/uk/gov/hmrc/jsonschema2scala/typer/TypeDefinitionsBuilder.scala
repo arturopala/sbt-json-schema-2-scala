@@ -29,17 +29,22 @@ object TypeDefinitionsBuilder {
       }
       .distinct
 
-    if (types.isEmpty) Left(s"Schema ${schema.uri} is not valid for type definition" :: Nil)
+    if (types.isEmpty) Left(s"Schema ${schema.uri} does not produce any type" :: Nil)
     else if (types.size == 1) Right(types.head)
     else {
       types.find(_.name == name) match {
 
         case Some(typeDef) => {
+
+          val typeDef2 = TypeDefinition.modifyPath(removeRoot)(typeDef)
+
           val embeddedTypes: Seq[TypeDefinition] = types
             .filterNot(_ == typeDef)
             .map(TypeDefinition.modifyPath(prependNameIfMissing(typeDef.name)))
 
-          Right(typeDef.copy(nestedTypes = typeDef.nestedTypes ++ embeddedTypes))
+          Right(
+            typeDef2
+              .copy(nestedTypes = typeDef2.nestedTypes ++ embeddedTypes))
         }
 
         case None =>
@@ -255,6 +260,10 @@ object TypeDefinitionsBuilder {
       case Nil     => name :: Nil
       case x :: xs => if (x == name) path else (name :: x :: xs).reverse
     }
+  }
+
+  val removeRoot: List[String] => List[String] = { path =>
+    path.dropRight(1)
   }
 
   case class Counter(initial: Int = 0) {
