@@ -445,7 +445,54 @@ class ScalaCodeGeneratorSpec
                                  |  }
                                  |}""".stripMargin)
 
-    verifiedTestSchemas /*.filter(_.name == "Entity15.schema.json")*/.foreach { schema: SchemaSource =>
+    "generate from schema with any of: nullable item or an array of item" in
+      assertCanParseAndCompile("""{
+                                 |  "$id": "http://example.com/test.json",
+                                 |  "definitions": {
+                                 |    "Item": {
+                                 |      "additionalProperties": {
+                                 |        "anyOf": [
+                                 |          {
+                                 |            "additionalProperties": {},
+                                 |            "type": "object"
+                                 |          },
+                                 |          {
+                                 |            "type": "null"
+                                 |          }
+                                 |        ]
+                                 |      }
+                                 |    }
+                                 |  },
+                                 |  "description": "A test schema",
+                                 |  "properties": {
+                                 |    "Item": {
+                                 |      "anyOf": [
+                                 |        {
+                                 |          "$ref": "#/definitions/Item"
+                                 |        },
+                                 |        {
+                                 |          "items": {
+                                 |            "anyOf": [
+                                 |              {
+                                 |                "$ref": "#/definitions/Item"
+                                 |              },
+                                 |              {
+                                 |                "type": "string"
+                                 |              }
+                                 |            ]
+                                 |          },
+                                 |          "type": "array"
+                                 |        },
+                                 |        {
+                                 |          "type": "null"
+                                 |        }
+                                 |      ]
+                                 |    }
+                                 |  },
+                                 |  "type": "object"
+                                 |}""".stripMargin)
+
+    verifiedTestSchemas /*.filter(_.name == "jscsrc.json")*/.foreach { schema: SchemaSource =>
       s"generate from ${schema.name}" in assertCanParseAndCompile(schema, verifiedTestSchemas)
     }
   }

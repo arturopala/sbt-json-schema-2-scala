@@ -175,16 +175,20 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
         |}"""*/
 
     val classCode: Option[ScalaCode] =
-      if (typeDef.isInterface)
+      if (typeDef.isInterface) {
+        val implementingTypesComment: String = typeDef.subtypes
+          .map(t => typeResolver.typeOf(t.schema, typeDef, wrapAsOption = false))
+          .mkString("Implementations: ", ",", "\n")
+
         Some(
           Trait(
             name = typeDef.name,
             members = generateInterfaceMethods(findCommonFields(typeDef.subtypes, typeDef)),
             modifier = Some("sealed"),
-            comment =
-              Some(s"${typeDef.schema.description.map(d => s"$d\n").getOrElse("")}Schema: ${typeDef.schema.uri}")
+            comment = Some(
+              s"${typeDef.schema.description.map(d => s"$d\n").getOrElse("")}${implementingTypesComment}Schema: ${typeDef.schema.uri}")
           ))
-      else {
+      } else {
         val parameters = classFields ++ (if (isTopLevel && context.renderGenerators)
                                            Seq(Param("id", "Option[String] = None"))
                                          else Seq.empty)
@@ -262,7 +266,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
 
   def compileClassInterfaceList(typeDef: TypeDefinition)(implicit typeResolver: TypeResolver): List[String] =
     (typeDef.interfaces
-      .map(it => typeResolver.typeOf(it.schema, typeDef, wrapAsOption = false, showDefaultValue = false))
+      .map(it => typeResolver.typeOf(it.schema, typeDef, wrapAsOption = false))
       .distinct
       .toList ++ typeResolver.interfacesOf(typeDef.schema, typeDef)).sorted
 
@@ -271,13 +275,13 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
     typeDef.schema.properties
       .take(maxNumberOfArgs)
       .sortBy(fieldOrder)
-      .map(
-        schema =>
-          Param(
-            name = typeNameProvider.toIdentifier(schema.name),
-            typeName = typeResolver.typeOf(schema, typeDef),
-            comment = schema.description
-        ))
+      .map(schema =>
+        Param(
+          name = typeNameProvider.toIdentifier(schema.name),
+          typeName = typeResolver.typeOf(schema, typeDef, wrapAsOption = true),
+          defaultValue = if (!schema.required) Some("None") else if (schema.boolean) Some("false") else None,
+          comment = schema.description
+      ))
 
   def fieldOrder(schema: Schema): Int = if (schema.required) 0 else if (schema.boolean) 1 else 2
 
@@ -302,7 +306,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
       .map {
         case o: ObjectSchema =>
           o.properties
-            .map(schema => (schema.name, typeResolver.typeOf(schema, viewpoint, showDefaultValue = false)))
+            .map(schema => (schema.name, typeResolver.typeOf(schema, viewpoint, wrapAsOption = true)))
             .toSet
         case _ => Set.empty[(String, String)]
       } match {
@@ -331,7 +335,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
     typeDef.schema.properties
       .take(maxNumberOfArgs)
       .flatMap(schema => {
-        val typeName = typeResolver.typeOf(schema, typeDef, showDefaultValue = false)
+        val typeName = typeResolver.typeOf(schema, typeDef, wrapAsOption = true)
         Seq(
           MethodDefinition(
             name = s"with${firstCharUppercase(normalize(schema.name))}",
@@ -407,7 +411,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
               case _: ObjectSchema => s"${typeNameProvider.toTypeName(o)}.gen"
               case _ =>
                 s"Gen.oneOf[${typeNameProvider.toTypeName(o)}](${o.variants
-                  .map(v => s"${generateValueGenerator(hostType, v, context)}.map(_.asInstanceOf[${typeResolver.typeOf(v, hostType, showDefaultValue = false)}])")
+                  .map(v => s"${generateValueGenerator(hostType, v, context)}.map(_.asInstanceOf[${typeResolver.typeOf(v, hostType, wrapAsOption = true)}])")
                   .mkString(",\n  ")})"
             }
         case e: ExternalSchemaReference => s"${typeNameProvider.toTypeName(e)}.gen"
@@ -438,7 +442,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
             Some(
               ValueDefinition(
                 name = s"${prop.name}Validator",
-                returnType = s"Validator[${typeResolver.typeOf(prop, typeDef, showDefaultValue = false)}]",
+                returnType = s"Validator[${typeResolver.typeOf(prop, typeDef, wrapAsOption = true)}]",
                 body = Seq(validator),
                 modifier = None
               ))

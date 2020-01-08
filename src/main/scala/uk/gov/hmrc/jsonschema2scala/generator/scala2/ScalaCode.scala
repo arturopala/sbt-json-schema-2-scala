@@ -129,7 +129,12 @@ object ScalaCode {
     }
   }
 
-  case class Param(name: String, typeName: String, modifier: Option[String] = None, comment: Option[String] = None)
+  case class Param(
+    name: String,
+    typeName: String,
+    defaultValue: Option[String] = None,
+    modifier: Option[String] = None,
+    comment: Option[String] = None)
       extends ScalaCode {
     override def append(b: CodeSink): Unit = {
       comment.foreach { c =>
@@ -143,6 +148,10 @@ object ScalaCode {
       b.append(name)
       b.append(": ")
       b.append(typeName)
+      defaultValue.foreach { value =>
+        b.append(" = ")
+        b.append(value)
+      }
     }
   }
 

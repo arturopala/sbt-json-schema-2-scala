@@ -25,11 +25,7 @@ trait TypeResolver {
 
   def any: String
 
-  def typeOf(
-    schema: Schema,
-    viewpoint: TypeDefinition,
-    wrapAsOption: Boolean = true,
-    showDefaultValue: Boolean = true): String
+  def typeOf(schema: Schema, viewpoint: TypeDefinition, wrapAsOption: Boolean): String
 
   def interfacesOf(schema: Schema, viewpoint: TypeDefinition): Set[String]
 

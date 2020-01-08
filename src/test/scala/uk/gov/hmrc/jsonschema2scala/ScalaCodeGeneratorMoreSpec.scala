@@ -45,7 +45,7 @@ class ScalaCodeGeneratorMoreSpec
 
   "JsonSchema2ScalaCodeRenderer" should {
     unverifiedTestSchemas
-      .filter(_.name.startsWith("appveyor"))
+    //.filter(_.name.startsWith("appveyor"))
       .foreach { schema: SchemaSource =>
         s"generate from ${schema.name}" in assertCanParseAndCompile(schema, unverifiedTestSchemas)
       }

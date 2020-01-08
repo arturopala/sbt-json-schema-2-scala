@@ -24,7 +24,7 @@ trait TestSchemas {
 
   lazy val allSchemas: Seq[SchemaSource] = unverifiedTestSchemas ++ verifiedTestSchemas
 
-  lazy val unverifiedTestSchemas: Seq[SchemaSource] = testSchemaList
+  lazy val unverifiedTestSchemas: Seq[SchemaSource] = unverifiedTestSchemaList
     .map(readSchemaSource)
 
   lazy val verifiedTestSchemas: Seq[SchemaSource] = verifiedTestSchemaList
@@ -63,6 +63,7 @@ trait TestSchemas {
     "apple-app-site-association.json",
     "appsettings.json",
     "appsscript.json",
+    "appveyor.json",
     "angular.schema.json",
     "asmdef.json",
     "babelrc.json",
@@ -152,6 +153,7 @@ trait TestSchemas {
     "ocelot.json",
     "omnisharp.json",
     "openfin.json",
+    "package.json",
     "package.manifest.json",
     "package.manifest-7.0.0.json",
     "package.manifest-8.0.0.json",
@@ -213,18 +215,17 @@ trait TestSchemas {
     "webjob-publish-settings.json",
     "webjobs-list.json",
     "xunit.runner.schema.json",
-    "ansible-stable-2.0.json",
-    "ansible-stable-2.1.json",
-    "ansible-stable-2.2.json"
+    "ansible-stable-2.0.json"
+    //"ansible-stable-2.1.json",
+    //"ansible-stable-2.2.json"
   )
 
-  val testSchemaList = Seq(
+  val unverifiedTestSchemaList = Seq(
     //"ansible-stable-2.3.json",
     //"ansible-stable-2.4.json",
     //"ansible-stable-2.5.json",
     //"ansible-stable-2.6.json",
     //"ansible-stable-2.7.json",
-    "appveyor.json",
     "avro-avsc.json",
     "azure-iot-edge-deployment-1.0.json",
     "azure-iot-edge-deployment-2.0.json",
@@ -261,7 +262,6 @@ trait TestSchemas {
     "mtaext.json",
     "ninjs-1.0.json",
     "opspec-io-0.1.7.json",
-    "package.json",
     "pattern.json",
     "phraseapp.json",
     "prometheus.json",

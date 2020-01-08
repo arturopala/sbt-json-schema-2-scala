@@ -36,7 +36,7 @@ object TypeDefinitionsBuilder {
 
         case Some(typeDef) => {
 
-          val typeDef2 = TypeDefinition.modifyPath(removeRoot)(typeDef)
+          val typeDef2 = TypeDefinition.modifyPath(_.dropRight(1))(typeDef)
 
           val embeddedTypes: Seq[TypeDefinition] = types
             .filterNot(_ == typeDef)
@@ -73,7 +73,7 @@ object TypeDefinitionsBuilder {
 
     val types: Seq[TypeDefinition] = schema match {
       case objectSchema: ObjectSchema        => processObjectSchema(name, path, objectSchema)
-      case oneOfSchema: OneOfAnyOfSchema     => processOneOfSchema(name, path, oneOfSchema) ++ templates
+      case oneOfSchema: OneOfAnyOfSchema     => processOneOfAnyOfSchema(name, path, oneOfSchema) ++ templates
       case notSchema: NotSchema              => processSchema(name, path, notSchema.schema) ++ templates
       case arraySchema: ArraySchema          => processArraySchema(name, path, arraySchema) ++ templates
       case mapSchema: MapSchema              => processMapSchema(name, path, mapSchema) ++ templates
@@ -116,26 +116,29 @@ object TypeDefinitionsBuilder {
   def processObjectSchema(name: String, path: List[String], objectSchema: ObjectSchema)(
     implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] = {
 
-    val templates: Seq[TypeDefinition] = processTemplates(name, path, objectSchema)
+    val typeName = {
+      if (objectSchema.properties.exists(_.name == name)) s"_$name" else name
+    }
+
+    val templates: Seq[TypeDefinition] = processTemplates(typeName, path, objectSchema)
     val templateNames: Set[String] = listTemplateNames(objectSchema, typeNameProvider)
 
     val nestedTypeDefinitions: Seq[TypeDefinition] =
       objectSchema.properties.flatMap { schema =>
         val childTypeName = {
           val n = typeNameProvider.toTypeName(schema)
-          if (templateNames.contains(n)) s"${name}_$n" else n
+          if (templateNames.contains(n)) s"${typeName}_$n" else n
         }
-        processSchema(childTypeName, name :: path, schema)
+        processSchema(childTypeName, typeName :: path, schema)
       }
 
-    Seq(TypeDefinition(name, path, objectSchema, sortByName(nestedTypeDefinitions ++ templates)))
+    Seq(TypeDefinition(typeName, path, objectSchema, sortByName(nestedTypeDefinitions ++ templates)))
   }
 
-  def processOneOfSchema(name: String, path: List[String], oneOfSchema: OneOfAnyOfSchema)(
+  def processOneOfAnyOfSchema(name: String, path: List[String], oneOfSchema: OneOfAnyOfSchema)(
     implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] = {
 
     val templateNames: Set[String] = listTemplateNames(oneOfSchema, typeNameProvider)
-
     val nonPrimitive: Seq[Schema] = oneOfSchema.variants.filterNot(_.primitive)
 
     val typeDefinitions = nonPrimitive.size match {
@@ -181,25 +184,36 @@ object TypeDefinitionsBuilder {
             }
           }
 
-        // New umbrella trait
-        val superType = TypeDefinition(
-          oneOfTypeName,
-          path,
-          ObjectSchema(
-            attributes = SchemaAttributes(
-              name = name,
-              path = oneOfSchema.path,
-              description = oneOfSchema.description,
-              required = oneOfSchema.required,
-              custom = None)),
-          isInterface = true,
-          subtypes = subtypes
-        )
-        val subtypesExtendingSuperType = subtypes.map(s => s.copy(interfaces = s.interfaces :+ superType))
-        Seq(
-          superType.copy(
-            subtypes = subtypesExtendingSuperType,
-            nestedTypes = subtypesExtendingSuperType.filterNot(_.forReferenceOnly)))
+        subtypes.size match {
+          case 0 => Seq.empty
+
+          case 1 =>
+            Seq(
+              TypeDefinition
+                .modifyPath(safeTail)(subtypes.head)
+                .copy(name = name))
+
+          case _ =>
+            // New umbrella trait
+            val superType = TypeDefinition(
+              oneOfTypeName,
+              path,
+              ObjectSchema(
+                attributes = SchemaAttributes(
+                  name = name,
+                  path = oneOfSchema.path,
+                  description = oneOfSchema.description,
+                  required = oneOfSchema.required,
+                  custom = None)),
+              isInterface = true,
+              subtypes = subtypes
+            )
+            val subtypesExtendingSuperType = subtypes.map(s => s.copy(interfaces = s.interfaces :+ superType))
+            Seq(
+              superType.copy(
+                subtypes = subtypesExtendingSuperType,
+                nestedTypes = subtypesExtendingSuperType.filterNot(_.forReferenceOnly)))
+        }
     }
 
     sortByName(typeDefinitions)
@@ -247,6 +261,17 @@ object TypeDefinitionsBuilder {
       case _ => Set()
     }.toSet
 
+  def declaresType(schema: Schema): Boolean = schema match {
+    case _: ObjectSchema          => true
+    case arraySchema: ArraySchema => !arraySchema.allItemsPrimitive
+    case mapSchema: MapSchema =>
+      mapSchema.definitions.exists(declaresType) || mapSchema.patternProperties.exists(declaresType)
+    case oneOfAnyOfSchema: OneOfAnyOfSchema => oneOfAnyOfSchema.variants.exists(declaresType)
+    case notSchema: NotSchema               => declaresType(notSchema.schema)
+    case reference: ExternalSchemaReference => declaresType(reference.schema)
+    case _                                  => false
+  }
+
   def sortByName(definitions: Seq[TypeDefinition]): Seq[TypeDefinition] =
     definitions.sortBy(_.name)
 
@@ -260,10 +285,6 @@ object TypeDefinitionsBuilder {
       case Nil     => name :: Nil
       case x :: xs => if (x == name) path else (name :: x :: xs).reverse
     }
-  }
-
-  val removeRoot: List[String] => List[String] = { path =>
-    path.dropRight(1)
   }
 
   case class Counter(initial: Int = 0) {

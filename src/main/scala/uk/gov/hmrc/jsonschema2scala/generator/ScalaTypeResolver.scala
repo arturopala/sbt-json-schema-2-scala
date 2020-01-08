@@ -26,11 +26,7 @@ class ScalaTypeResolver(
 
   override val any: String = "Any"
 
-  override def typeOf(
-    schema: Schema,
-    viewpoint: TypeDefinition,
-    wrapAsOption: Boolean = true,
-    showDefaultValue: Boolean = true): String = {
+  override def typeOf(schema: Schema, viewpoint: TypeDefinition, wrapAsOption: Boolean): String = {
 
     val typeName = schema match {
 
@@ -40,61 +36,76 @@ class ScalaTypeResolver(
       case _: BooleanSchema => "Boolean"
       case _: NullSchema    => any
 
-      case objectSchema: ObjectSchema => schemaTypeNameAsSeenFrom(objectSchema, viewpoint)
+      case objectSchema: ObjectSchema =>
+        schemaTypeNameAsSeenFrom(objectSchema, viewpoint)
+          .getOrElse(
+            throw new IllegalStateException(
+              s"Resolving type of object schema ${objectSchema.uri}, but the type definition unknown."))
 
       case mapSchema: MapSchema =>
         if (mapSchema.patternProperties.size == 1)
-          s"Map[String,${typeOf(mapSchema.patternProperties.head, viewpoint, wrapAsOption = false, showDefaultValue = false)}]"
+          s"Map[String,${typeOf(mapSchema.patternProperties.head, viewpoint, wrapAsOption = false)}]"
         else s"Map[String,$any]"
 
       case arraySchema: ArraySchema =>
         arraySchema.items
           .map {
-            case item :: Nil => s"Seq[${typeOf(item, viewpoint, wrapAsOption = false, showDefaultValue = false)}]"
+            case item :: Nil => s"Seq[${typeOf(item, viewpoint, wrapAsOption = false)}]"
             case many =>
               many.map(_.getClass.getSimpleName).distinct.toList match {
                 case "JsObject" :: Nil => s"Seq[AnyRef]"
-                case _ :: Nil          => s"Seq[${typeOf(many.head, viewpoint, wrapAsOption = false, showDefaultValue = false)}]"
+                case _ :: Nil          => s"Seq[${typeOf(many.head, viewpoint, wrapAsOption = false)}]"
                 case _                 => s"Seq[$any]"
               }
 
           }
           .getOrElse(s"Seq[$any]")
 
-      case oneOfSchema: OneOfAnyOfSchema =>
+      case oneOfSchema: OneOfAnyOfSchema => {
+        val variants = oneOfSchema.variants.filter {
+          case _: NullSchema => false
+          case _             => true
+        }
         if (oneOfSchema.variants.isEmpty) "Nothing"
-        else if (oneOfSchema.variants.size == 1) typeOf(oneOfSchema.variants.head, viewpoint, wrapAsOption = false)
-        else if (oneOfSchema.variants.forall(_.primitive)) {
-          val types = oneOfSchema.variants
-            .map(typeOf(_, viewpoint, wrapAsOption = false, showDefaultValue = false))
+        else if (variants.size == 1)
+          typeOf(oneOfSchema.variants.head, viewpoint, wrapAsOption = false)
+        else if (variants.forall(_.primitive)) {
+          val types = variants
+            .map(typeOf(_, viewpoint, wrapAsOption = false))
             .distinct
           if (types.size == 1) types.head else "AnyVal"
-        } else if (oneOfSchema.variants.forall(v => !v.primitive)) schemaTypeNameAsSeenFrom(oneOfSchema, viewpoint)
-        else "Any"
+        } else if (variants.forall(v => !v.primitive)) {
+          schemaTypeNameAsSeenFrom(oneOfSchema, viewpoint)
+            .getOrElse("AnyRef")
+        } else "Any"
+      }
 
-      case not: NotSchema => typeOf(not.schema, viewpoint, wrapAsOption = false, showDefaultValue)
+      case not: NotSchema => typeOf(not.schema, viewpoint, wrapAsOption = false)
 
       case ite: IfThenElseSchema =>
         ite.elseSchema match {
-          case None => typeOf(ite.schema, viewpoint, wrapAsOption = false, showDefaultValue)
+          case None => typeOf(ite.schema, viewpoint, wrapAsOption = false)
           case Some(elseSchema) =>
-            val schemaType = typeOf(ite.schema, viewpoint, wrapAsOption, showDefaultValue)
-            val elseSchemaType = typeOf(elseSchema, viewpoint, wrapAsOption, showDefaultValue)
+            val schemaType = typeOf(ite.schema, viewpoint, wrapAsOption)
+            val elseSchemaType = typeOf(elseSchema, viewpoint, wrapAsOption)
             if (schemaType == elseSchemaType) schemaType else "AnyRef"
         }
 
       case internalReference: InternalSchemaReference =>
-        typeOf(internalReference.schema, viewpoint, wrapAsOption = false, showDefaultValue = false)
+        typeOf(internalReference.schema, viewpoint, wrapAsOption = false)
 
       case externalReference: ExternalSchemaReference =>
-        typeOf(externalReference.schema, viewpoint, wrapAsOption = false, showDefaultValue = false)
+        typeOf(externalReference.schema, viewpoint, wrapAsOption = false)
 
       case schemaStub: SchemaStub =>
         schemaTypeNameAsSeenFrom(schemaStub.reference, viewpoint)
+          .getOrElse(
+            throw new IllegalStateException(
+              s"Resolving type of schema reference ${schemaStub.reference}, but the type definition unknown."))
+
     }
 
-    if (!schema.required && wrapAsOption) s"Option[$typeName]${if (showDefaultValue) " = None" else ""}"
-    else { s"""$typeName${if (showDefaultValue && schema.boolean) " = false" else ""}""" }
+    if (!schema.required && wrapAsOption) s"Option[$typeName]" else typeName
   }
 
   override def interfacesOf(schema: Schema, viewpoint: TypeDefinition): Set[String] = {
@@ -110,22 +121,17 @@ class ScalaTypeResolver(
       .getOrElse(Set.empty)
   }
 
-  def schemaTypeNameAsSeenFrom(schema: Schema, viewpoint: TypeDefinition): String =
+  def schemaTypeNameAsSeenFrom(schema: Schema, viewpoint: TypeDefinition): Option[String] =
     schemaTypeNameAsSeenFrom(schema.uri, viewpoint)
 
-  def schemaTypeNameAsSeenFrom(uri: String, viewpoint: TypeDefinition): String = {
-    val typeName = schemaUriToTypePath.get(uri) match {
-      case Some(targetPath) =>
+  def schemaTypeNameAsSeenFrom(uri: String, viewpoint: TypeDefinition): Option[String] =
+    schemaUriToTypePath
+      .get(uri)
+      .map { targetPath =>
         val hostPath = viewpoint.path.reverse
         val guestPath = targetPath.reverse
         val relativePath = TypeResolver.shortenPrefix(guestPath, hostPath)
         relativePath.mkString(".")
-
-      case None =>
-        throw new IllegalStateException(s"Resolving type of schema $uri, but the type definition unknown.")
-    }
-
-    typeName
-  }
+      }
 
 }

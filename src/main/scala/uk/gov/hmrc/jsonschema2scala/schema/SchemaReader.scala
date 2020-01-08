@@ -168,7 +168,7 @@ object SchemaReader {
       .asOpt[JsValue]
       .map {
         case JsString(schemaType)     => readSchemaWithType(p, schemaType)
-        case JsArray(schemaTypeArray) => readSchemaWithTypeArray(p, schemaTypeArray)
+        case JsArray(schemaTypeArray) => readSchemaWithTypesArray(p, schemaTypeArray)
         case other =>
           throw new IllegalStateException(
             s"Invalid type definition, expected a string or an array of strings but got $other")
@@ -182,13 +182,13 @@ object SchemaReader {
       case "boolean" => readBooleanSchema(p)
       case "object"  => readObjectSchema(p)
       case "array"   => readArraySchema(p)
-      case "null"    => readObjectSchema(p)
+      case "null"    => NullSchema(p.a) //readObjectSchema(p)
       case other =>
         throw new IllegalStateException(
           s"Invalid type name, expected one of [null, boolean, object, array, number, integer, string], but got $other")
     }
 
-  def readSchemaWithTypeArray(p: Parameters, schemaTypeArray: Seq[JsValue]): Schema = {
+  def readSchemaWithTypesArray(p: Parameters, schemaTypeArray: Seq[JsValue]): Schema = {
 
     val variants: Seq[Schema] = schemaTypeArray.distinct.map {
       case JsString(valueType) =>
@@ -490,14 +490,25 @@ object SchemaReader {
             value = property,
             requiredFields = p.requiredFields,
             currentReferenceResolver = p.referenceResolver))
-          .map {
-            case o: ObjectSchema => o.properties
-            case m: MapSchema    => m.patternProperties
-            case other           => Seq(other)
-          }
+          .map(extractAdditionalProperties)
 
       case _ => None
     }
+
+  val extractAdditionalProperties: Schema => Seq[Schema] = {
+    case objectSchema: ObjectSchema => objectSchema.properties
+    case mapSchema: MapSchema       => mapSchema.patternProperties
+
+    case oneOfAnyOfSchema: OneOfAnyOfSchema =>
+      val nonPrimitive: Seq[Schema] = oneOfAnyOfSchema.variants.filterNot(_.primitive)
+      nonPrimitive.size match {
+        case 0 => Seq()
+        case 1 => extractAdditionalProperties(nonPrimitive.head)
+        case _ => Seq(oneOfAnyOfSchema)
+      }
+
+    case other => Seq(other) // we might want to support more cases if needed
+  }
 
   def readArraySchema(p: Parameters): ArraySchema = {
 
