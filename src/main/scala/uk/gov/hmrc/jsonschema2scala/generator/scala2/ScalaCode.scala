@@ -16,6 +16,7 @@
 
 package uk.gov.hmrc.jsonschema2scala.generator.scala2
 
+import uk.gov.hmrc.jsonschema2scala.generator.scala2.ScalaCode.BlockComment.escape
 import uk.gov.hmrc.jsonschema2scala.generator.{Code, CodeSink, TextUtils}
 
 sealed trait ScalaCode extends Code
@@ -199,8 +200,9 @@ object ScalaCode {
 
   object BlockComment {
     def append(comment: String, b: CodeSink, doc: Boolean): Unit = {
+      val optimalLength = TextUtils.estimateOptimalLength(comment, 80)
       val lines = TextUtils
-        .splitAndNormalize(comment, 80)
+        .splitAndNormalize(comment, optimalLength, TextUtils.findCommentSplitPosition)
         .map(escape)
       if (lines.nonEmpty) {
         lines.headOption.map(line => {
@@ -291,7 +293,16 @@ object ScalaCode {
           if (body.size > 1) {
             b.newline
           }
-          b.append(c)
+          val lines = TextUtils
+            .splitAndNormalize(c, 80, TextUtils.findCodeSplitPosition)
+            .map(escape)
+          b.append(lines.head)
+          b.indentInc
+          lines.tail.foreach { l =>
+            b.newline
+            b.append(l)
+          }
+          b.indentDec
         })
         if (body.size > 1) {
           b.indentDec.newline

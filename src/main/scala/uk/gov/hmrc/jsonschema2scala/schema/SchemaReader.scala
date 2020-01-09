@@ -167,8 +167,13 @@ object SchemaReader {
     (p.json \ "type")
       .asOpt[JsValue]
       .map {
-        case JsString(schemaType)     => readSchemaWithType(p, schemaType)
-        case JsArray(schemaTypeArray) => readSchemaWithTypesArray(p, schemaTypeArray)
+        case JsString(schemaType) => readSchemaWithType(p, schemaType)
+
+        case JsArray(schemaTypeArray) =>
+          attemptReadOneOf(p)
+            .orElse(attemptReadAnyOf(p))
+            .getOrElse(readSchemaWithTypesArray(p, schemaTypeArray))
+
         case other =>
           throw new IllegalStateException(
             s"Invalid type definition, expected a string or an array of strings but got $other")
@@ -182,7 +187,7 @@ object SchemaReader {
       case "boolean" => readBooleanSchema(p)
       case "object"  => readObjectSchema(p)
       case "array"   => readArraySchema(p)
-      case "null"    => NullSchema(p.a) //readObjectSchema(p)
+      case "null"    => NullSchema(p.a)
       case other =>
         throw new IllegalStateException(
           s"Invalid type name, expected one of [null, boolean, object, array, number, integer, string], but got $other")
@@ -193,13 +198,13 @@ object SchemaReader {
     val variants: Seq[Schema] = schemaTypeArray.distinct.map {
       case JsString(valueType) =>
         valueType match {
-          case "string"  => StringSchema(p.a)
-          case "number"  => NumberSchema(p.a)
-          case "integer" => IntegerSchema(p.a)
-          case "boolean" => BooleanSchema(p.a)
-          case "object"  => ObjectSchema(p.a)
+          case "string"  => readStringSchema(p)
+          case "number"  => readNumberSchema(p)
+          case "integer" => readIntegerSchema(p)
+          case "boolean" => readBooleanSchema(p)
+          case "object"  => readObjectSchema(p.copy(path = "!object" :: p.path))
+          case "array"   => readArraySchema(p.copy(path = "!array" :: p.path))
           case "null"    => NullSchema(p.a)
-          case "array"   => ArraySchema(p.a)
           case other =>
             throw new IllegalStateException(
               s"Invalid type name, expected one of [null, boolean, object, array, number, integer, string], but got $other")
@@ -208,6 +213,7 @@ object SchemaReader {
         throw new IllegalStateException(s"Invalid type definition, expected an array of strings, but got $other")
 
     }
+
     if (variants.isEmpty) throw new IllegalStateException(s"")
     else if (variants.size == 1) variants.head
     else OneOfAnyOfSchema(p.a, variants, isOneOf = true)

@@ -18,12 +18,13 @@ package uk.gov.hmrc.jsonschema2scala.generator
 
 object TextUtils {
 
-  final def splitAndNormalize(text: String, length: Int): List[String] = {
-    val betterLength = {
-      val equal = text.length / (text.length / length + 1)
-      val diff = Math.abs(equal - length)
-      if (diff > 2 && diff < (length / 3)) equal else length
-    }
+  final def estimateOptimalLength(text: String, targetLength: Int): Int = {
+    val equal = text.length / (text.length / targetLength + 1)
+    val diff = Math.abs(equal - targetLength)
+    if (diff > 2 && diff < (targetLength / 3)) equal else targetLength
+  }
+
+  final def splitAndNormalize(text: String, targetLength: Int, splitPosition: (String, Int) => Int): List[String] =
     text
       .split('\n')
       .foldLeft(List.empty[String])(
@@ -36,38 +37,53 @@ object TextUtils {
               case _                         => v :: acc
           })
       .reverse
-      .flatMap(splitAround(_, betterLength)) match {
+      .flatMap(splitAround(_, targetLength, splitPosition)) match {
       case Nil     => Nil
       case x :: xs => if (xs.isEmpty || x.trim.isEmpty) x :: xs else "" :: x :: xs
     }
-  }
 
-  final def splitAround(string: String, length: Int): List[String] =
-    if (string.length < length) List(string)
+  final def splitAround(string: String, targetLength: Int, splitPosition: (String, Int) => Int): List[String] =
+    if (string.length < targetLength) List(string)
     else {
-      val p = findSplitPosition(string, length)
-      if (p < 0 || (string.length - p) < (length / 5)) List(string)
+      val p = splitPosition(string, targetLength)
+      if (p < 0 || (string.length - p) < (targetLength / 5)) List(string)
       else {
         val slice = string.substring(0, p + 1)
         val next = {
           val s = string.substring(p + 1)
           if ((slice.endsWith(",") || slice.endsWith(".")) && s.startsWith(" ")) s.substring(1) else s
         }
-        slice :: splitAround(next, length)
+        slice :: splitAround(next, targetLength, splitPosition)
       }
     }
 
-  final def findSplitPosition(string: String, length: Int): Int = {
+  final def findCommentSplitPosition(string: String, targetLength: Int): Int = {
     val positions = List(
-      (string.indexOf('.', Math.max(length - (length / 5), 0)), 0.5, 0),
-      (string.indexOf('.', length), 0.5, 1),
-      (string.indexOf(',', Math.max(length - (length / 5), 0)), 1.0, 4),
-      (string.indexOf(',', length), 1.0, 5),
-      (string.indexOf(' ', Math.max(length - (length / 5), 0)), 2.0, 8),
-      (string.indexOf(' ', length), 2.0, 9)
+      (string.indexOf('.', Math.max(targetLength - (targetLength / 5), 0)), 0.5, 0),
+      (string.indexOf('.', targetLength), 0.5, 1),
+      (string.indexOf(',', Math.max(targetLength - (targetLength / 5), 0)), 1.0, 4),
+      (string.indexOf(',', targetLength), 1.0, 5),
+      (string.indexOf(' ', Math.max(targetLength - (targetLength / 5), 0)), 2.0, 8),
+      (string.indexOf(' ', targetLength), 2.0, 9)
     ).filter(_._1 >= 0).map {
       case (pos, weight, offset) =>
-        (pos, Math.abs(length - pos) * weight + offset)
+        (pos, Math.abs(targetLength - pos) * weight + offset)
+    }
+    positions match {
+      case Nil      => -1
+      case nonEmpty => nonEmpty.minBy(_._2)._1
+    }
+  }
+
+  final def findCodeSplitPosition(string: String, targetLength: Int): Int = {
+    val positions = List(
+      (string.indexOf("\",", Math.max(targetLength - (targetLength / 5), 0)), 0.5, 0),
+      (string.indexOf("\",", targetLength), 0.5, 1),
+      (string.indexOf(",\"", Math.max(targetLength - (targetLength / 5), 0)), 1.0, 4),
+      (string.indexOf(",\"", targetLength), 1.0, 5)
+    ).filter(_._1 >= 0).map {
+      case (pos, weight, offset) =>
+        (pos, Math.abs(targetLength - pos) * weight + offset)
     }
     positions match {
       case Nil      => -1

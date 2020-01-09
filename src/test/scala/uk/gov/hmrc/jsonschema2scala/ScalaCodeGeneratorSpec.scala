@@ -445,7 +445,7 @@ class ScalaCodeGeneratorSpec
                                  |  }
                                  |}""".stripMargin)
 
-    "generate from schema with any of: nullable item or an array of item" in
+    "generate from schema when allOf property name same as schema and type" in
       assertCanParseAndCompile("""{
                                  |  "$id": "http://example.com/test.json",
                                  |  "definitions": {
@@ -492,9 +492,101 @@ class ScalaCodeGeneratorSpec
                                  |  "type": "object"
                                  |}""".stripMargin)
 
-    verifiedTestSchemas /*.filter(_.name == "jscsrc.json")*/.foreach { schema: SchemaSource =>
-      s"generate from ${schema.name}" in assertCanParseAndCompile(schema, verifiedTestSchemas)
-    }
+    "generate from schema when types array and `oneOf` defined together" in
+      assertCanParseAndCompile("""{
+                                 |  "$id": "http://example.com/test.json",
+                                 |  "description": "A test schema",
+                                 |  "type": "object",
+                                 |  "properties": {
+                                 |    "item": {
+                                 |      "type": [
+                                 |        "boolean",
+                                 |        "integer",
+                                 |        "null",
+                                 |        "object"
+                                 |      ],
+                                 |      "oneOf": [
+                                 |        {
+                                 |          "type": "boolean"
+                                 |        },
+                                 |        {
+                                 |          "type": "integer"
+                                 |        },
+                                 |        {
+                                 |          "$ref": "#/definitions/null"
+                                 |        },
+                                 |        {
+                                 |          "type": "object",
+                                 |          "properties": {
+                                 |            "first": {
+                                 |              "type": "boolean"
+                                 |            },
+                                 |            "second": {
+                                 |              "type": "integer"
+                                 |            }
+                                 |          }
+                                 |        }
+                                 |      ]
+                                 |    }
+                                 |  },
+                                 |  "definitions": {
+                                 |    "null": {
+                                 |      "type": "null"
+                                 |    }
+                                 |  }
+                                 |}""".stripMargin)
+
+    "generate from schema when types array and `items` defined together" in
+      assertCanParseAndCompile("""{
+                                 |  "$id": "http://example.com/test.json",
+                                 |  "description": "A test schema",
+                                 |  "type": "object",
+                                 |  "properties": {
+                                 |    "item": {
+                                 |      "type": [
+                                 |        "array",
+                                 |        "boolean",
+                                 |        "null"
+                                 |      ],
+                                 |      "items": {
+                                 |        "enum": ["a","b","c","d",null]
+                                 |      },
+                                 |      "uniqueItems": true
+                                 |    }
+                                 |  }
+                                 |}""".stripMargin)
+
+    "generate from schema when types array and `items` and `properties` defined together" in
+      assertCanParseAndCompile("""{
+                                 |  "$id": "http://example.com/test.json",
+                                 |  "description": "A test schema",
+                                 |  "type": "object",
+                                 |  "properties": {
+                                 |    "item": {
+                                 |      "type": ["array","object"],
+                                 |      "items": {
+                                 |        "type": "object",
+                                 |        "properties": {
+                                 |          "one": {
+                                 |            "type": "string"
+                                 |          }
+                                 |        }
+                                 |      },
+                                 |      "uniqueItems": true,
+                                 |      "properties": {
+                                 |        "one": {
+                                 |          "type": "string"
+                                 |        }
+                                 |      }
+                                 |    }
+                                 |  }
+                                 |}""".stripMargin)
+
+    verifiedTestSchemas
+      .filter(_.name == "jdt.json")
+      .foreach { schema: SchemaSource =>
+        s"generate from ${schema.name}" in assertCanParseAndCompile(schema, verifiedTestSchemas)
+      }
   }
 
 }

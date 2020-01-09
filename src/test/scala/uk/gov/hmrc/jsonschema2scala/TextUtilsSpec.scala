@@ -33,6 +33,7 @@ package uk.gov.hmrc.jsonschema2scala
  */
 
 import org.scalatest.{Matchers, WordSpec}
+import uk.gov.hmrc.jsonschema2scala.generator.TextUtils
 import uk.gov.hmrc.jsonschema2scala.generator.TextUtils.splitAndNormalize
 
 class TextUtilsSpec extends WordSpec with Matchers with TestSchemas {
@@ -42,13 +43,17 @@ class TextUtilsSpec extends WordSpec with Matchers with TestSchemas {
 
   "TextUtils" should {
     "split text to fit around expected line length" in {
-      splitAndNormalize(loremIpsum, 15).drop(1).head shouldBe "Lorem ipsum dolor "
-      splitAndNormalize(loremIpsum, 20).drop(1).head shouldBe "Lorem ipsum dolor sit amet,"
-      splitAndNormalize(loremIpsum, 30).drop(1).head shouldBe "Lorem ipsum dolor sit amet,"
-      splitAndNormalize(loremIpsum, 60)
+      splitAndNormalize(loremIpsum, 15, TextUtils.findCommentSplitPosition).drop(1).head shouldBe "Lorem ipsum dolor "
+      splitAndNormalize(loremIpsum, 20, TextUtils.findCommentSplitPosition)
+        .drop(1)
+        .head shouldBe "Lorem ipsum dolor sit amet,"
+      splitAndNormalize(loremIpsum, 30, TextUtils.findCommentSplitPosition)
+        .drop(1)
+        .head shouldBe "Lorem ipsum dolor sit amet,"
+      splitAndNormalize(loremIpsum, 60, TextUtils.findCommentSplitPosition)
         .drop(1)
         .head shouldBe "Lorem ipsum dolor sit amet, consectetur adipisci elit."
-      splitAndNormalize("Lorem ipsum dolor sit amet, consectetur adipisci elit", 45).headOption shouldBe Some(
+      splitAndNormalize("Lorem ipsum dolor sit amet, consectetur adipisci elit", 45, TextUtils.findCommentSplitPosition).headOption shouldBe Some(
         "Lorem ipsum dolor sit amet, consectetur adipisci elit")
     }
   }
