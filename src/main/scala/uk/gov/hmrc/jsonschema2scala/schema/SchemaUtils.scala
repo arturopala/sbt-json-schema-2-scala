@@ -32,6 +32,11 @@ object SchemaUtils {
       case _                        => Seq.empty
     })
 
+  def copy(schema: Schema, name: String): Schema = {
+    val newAttributes = schema.attributes.copy(name = name)
+    copyAttributes(schema, newAttributes)
+  }
+
   def copy(schema: Schema, name: String, path: List[String], description: Option[String]): Schema = {
     val newAttributes =
       schema.attributes.copy(name = name, path = path, description = description.orElse(schema.description))

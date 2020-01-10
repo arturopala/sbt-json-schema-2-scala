@@ -73,15 +73,15 @@ object TypeDefinitionsBuilder {
 
     val types: Seq[TypeDefinition] = schema match {
       case objectSchema: ObjectSchema        => processObjectSchema(name, path, objectSchema)
-      case oneOfSchema: OneOfAnyOfSchema     => processOneOfAnyOfSchema(name, path, oneOfSchema) ++ templates
-      case notSchema: NotSchema              => processSchema(name, path, notSchema.schema) ++ templates
-      case arraySchema: ArraySchema          => processArraySchema(name, path, arraySchema) ++ templates
-      case mapSchema: MapSchema              => processMapSchema(name, path, mapSchema) ++ templates
-      case external: ExternalSchemaReference => processExternalSchemaReference(name, path, external) ++ templates
+      case oneOfSchema: OneOfAnyOfSchema     => templates ++ processOneOfAnyOfSchema(name, path, oneOfSchema)
+      case notSchema: NotSchema              => templates ++ processSchema(name, path, notSchema.schema)
+      case arraySchema: ArraySchema          => templates ++ processArraySchema(name, path, arraySchema)
+      case mapSchema: MapSchema              => templates ++ processMapSchema(name, path, mapSchema)
+      case external: ExternalSchemaReference => templates ++ processExternalSchemaReference(name, path, external)
       case _                                 => templates
     }
 
-    types
+    sortByName(avoidNameCollisions(types, ""))
   }
 
   def processInternalSchemaReference(name: String, path: List[String], schema: Schema)(
@@ -121,72 +121,54 @@ object TypeDefinitionsBuilder {
     }
 
     val templates: Seq[TypeDefinition] = processTemplates(typeName, path, objectSchema)
-    val templateNames: Set[String] = listTemplateNames(objectSchema, typeNameProvider)
 
     val nestedTypeDefinitions: Seq[TypeDefinition] =
       objectSchema.properties.flatMap { schema =>
-        val childTypeName = {
-          val n = typeNameProvider.toTypeName(schema)
-          if (templateNames.contains(n)) s"${typeName}_$n" else n
-        }
+        val childTypeName = typeNameProvider.toTypeName(schema)
         processSchema(childTypeName, typeName :: path, schema)
       }
 
-    Seq(TypeDefinition(typeName, path, objectSchema, sortByName(nestedTypeDefinitions ++ templates)))
+    Seq(
+      TypeDefinition(
+        typeName,
+        path,
+        objectSchema,
+        sortByName(avoidNameCollisions(templates ++ nestedTypeDefinitions, typeName))))
   }
 
   def processOneOfAnyOfSchema(name: String, path: List[String], oneOfSchema: OneOfAnyOfSchema)(
     implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] = {
 
-    val templateNames: Set[String] = listTemplateNames(oneOfSchema, typeNameProvider)
-    val nonPrimitive: Seq[Schema] = oneOfSchema.variants.filterNot(_.primitive)
+    val nonPrimitives: Seq[Schema] = oneOfSchema.variants.filterNot(_.primitive)
+    val oneOfTypeName = typeNameProvider.toTypeName(oneOfSchema)
 
-    val typeDefinitions = nonPrimitive.size match {
+    val (nonArrays, arrays) = nonPrimitives
+      .partition { case _: ArraySchema => false; case _ => true }
 
+    val arrayTypeDefinitions = arrays.flatMap { schema =>
+      processSchema(name, path, schema) ++
+        processInternalSchemaReference(name, path, schema) ++
+        processExternalSchemaReference(name, path, schema)
+    }
+
+    val nonArrayTypeDefinitions = nonArrays.size match {
       case 0 => Seq.empty
-
       case 1 =>
-        processSchema(name, path, nonPrimitive.head)
+        processSchema(name, path, nonArrays.head)
 
       case many =>
-        val oneOfTypeName = typeNameProvider.toTypeName(oneOfSchema)
-        val sameNameCounters: Map[String, Counter] =
-          nonPrimitive
-            .map(typeNameProvider.toTypeName)
-            .groupBy(identity)
-            .mapValues(_.size)
-            .filter(_._2 > 1)
-            .mapValues(_ => Counter())
-            .toSeq
-            .toMap
-        var pos = 0
-        val subtypes = nonPrimitive
-          .flatMap { schema =>
-            {
-              val subtypeName = {
-                val n = typeNameProvider.toTypeName(schema)
-                if (templateNames.contains(n)) s"${name}_$n" else n
-              }
-
-              val subtypeNameVariant =
-                if (typeNameProvider.toTypeName(schema) == oneOfTypeName) {
-                  pos = pos + 1
-                  typeNameProvider.toTypeNameVariant(schema, pos)
-                } else if (sameNameCounters.contains(subtypeName)) {
-                  val counter = sameNameCounters(subtypeName)
-                  val pos = counter.increment
-                  typeNameProvider.toTypeNameVariant(schema, pos)
-                } else typeNameProvider.toTypeName(schema)
-
-              processSchema(subtypeNameVariant, name :: path, schema) ++
-                processInternalSchemaReference(subtypeNameVariant, name :: path, schema) ++
-                processExternalSchemaReference(subtypeNameVariant, name :: path, schema)
-            }
-          }
+        val subtypes = avoidNameCollisions(
+          nonArrays
+            .flatMap { schema =>
+              processSchema(name, name :: path, schema) ++
+                processInternalSchemaReference(name, name :: path, schema) ++
+                processExternalSchemaReference(name, name :: path, schema)
+            },
+          oneOfTypeName
+        )
 
         subtypes.size match {
           case 0 => Seq.empty
-
           case 1 =>
             Seq(
               TypeDefinition
@@ -216,7 +198,7 @@ object TypeDefinitionsBuilder {
         }
     }
 
-    sortByName(typeDefinitions)
+    nonArrayTypeDefinitions ++ arrayTypeDefinitions
   }
 
   def processArraySchema(name: String, path: List[String], arraySchema: ArraySchema)(
@@ -235,11 +217,8 @@ object TypeDefinitionsBuilder {
         processSchema(childTypeName, name :: path, schema)
       }
 
-    sortByName(typeDefinitions)
+    typeDefinitions
   }
-
-  def listTemplateNames(schema: Schema, typeNameProvider: TypeNameProvider): Set[String] =
-    schema.definitions.map(typeNameProvider.toTypeName).toSet
 
   def calculateExternalImports(schema: ObjectSchema)(implicit typeNameProvider: TypeNameProvider): Set[String] =
     schema.properties.flatMap {
@@ -287,11 +266,38 @@ object TypeDefinitionsBuilder {
     }
   }
 
-  case class Counter(initial: Int = 0) {
-    var v: Int = initial
-    def increment: Int = {
+  case class NameVariantIterator(name: String, size: Int) {
+    var v: Int = 1
+    def next: String = {
+      val newName = if (v == 1) {
+        if (size == 1) name else s"${name}_$v"
+      } else s"${name}_$v"
       v = v + 1
-      v
+      newName
     }
   }
+
+  def avoidNameCollisions(types: Seq[TypeDefinition], parentName: String)(
+    implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] =
+    if (types.size <= 1) types
+    else {
+      val similar: Map[String, Int] = (types
+        .map(_.name) :+ parentName)
+        .groupBy(identity)
+        .mapValues(_.size)
+
+      if (similar.size == types.size + 1) types
+      else {
+        val nameVariantIterators: Map[String, NameVariantIterator] = similar.map {
+          case (name, size) => name -> NameVariantIterator(name, size)
+        }
+
+        types.map { typeDef =>
+          val typeName = typeDef.name
+          val newTypeName = nameVariantIterators(typeName).next
+          if (newTypeName == typeName) typeDef
+          else TypeDefinition.changeName(newTypeName, typeDef)
+        }
+      }
+    }
 }

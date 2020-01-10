@@ -19,9 +19,10 @@ package uk.gov.hmrc.jsonschema2scala.schema
 import java.net
 import java.net.URI
 
-import play.api.libs.json.{JsLookup, JsLookupResult, JsObject, JsValue}
+import play.api.libs.json._
 
 import scala.collection.mutable
+import scala.util.Try
 
 trait SchemaReferenceResolver {
 
@@ -71,9 +72,17 @@ object SchemaReferenceResolver {
       .map(s => if (s.contains("%")) net.URLDecoder.decode(s, "utf-8") else s)
       .toList
 
-  def resolveJsonPointer(jsonPointer: List[String])(json: JsObject): JsLookupResult =
+  def resolveJsonPointer(jsonPointer: List[String], uri: URI)(json: JsObject): JsLookupResult =
     jsonPointer
-      .foldLeft[JsLookup](json)((s, p) => s \ p)
+      .foldLeft[JsLookup](json) { (s, p) =>
+        s match {
+          case JsLookup(JsDefined(a: JsArray)) =>
+            Try(p.toInt)
+              .map(i => a \ i)
+              .getOrElse(throw new IllegalArgumentException(s"Invalid reference $uri, cannot access $s with '$p'"))
+          case _ => s \ p
+        }
+      }
       .result
 
   def sameOrigin(uri1: URI, uri2: URI): Boolean =
@@ -121,7 +130,7 @@ object CachingReferenceResolver {
           val jsonPointer: List[String] = toJsonPointer(relative)
 
           val result: Option[JsValue] =
-            resolveJsonPointer(jsonPointer)(json)
+            resolveJsonPointer(jsonPointer, uri)(json)
               .asOpt[JsValue]
 
           result
@@ -138,6 +147,17 @@ object CachingReferenceResolver {
       val isFragmentOnly: Boolean = SchemaReferenceResolver.isFragmentOnly(uri)
       val (absolute, relative) = computeAbsoluteAndRelativeUriString(rootUri, uri)
 
+      def read(jsObject: JsObject, name: String): Schema = {
+        // prevent cycles by caching a schema stub
+        val stub = SchemaStub(reader(name, emptyJsObject, this), absolute)
+        cache.update(absolute, stub)
+
+        val schema: Schema = reader(name, jsObject, this)
+
+        cache.update(absolute, schema)
+        schema
+      }
+
       cache
         .get(absolute)
         .orElse {
@@ -147,18 +167,15 @@ object CachingReferenceResolver {
 
             val name = if (jsonPointer.isEmpty) schemaName else jsonPointer.last
 
-            val result: Option[Schema] = resolveJsonPointer(jsonPointer)(json)
-              .asOpt[JsObject]
-              .map { schemaJson =>
-                // prevent cycles by caching a schema stub
-                val stub = SchemaStub(reader(name, emptyJsObject, this), absolute)
-                cache.update(absolute, stub)
-
-                val schema: Schema = reader(name, schemaJson, this)
-
-                cache.update(absolute, schema)
-                schema
+            val result: Option[Schema] = resolveJsonPointer(jsonPointer, uri)(json)
+              .asOpt[JsValue]
+              .flatMap {
+                case jsObject: JsObject                      => Some(jsObject)
+                case jsArray: JsArray                        => Some(Json.obj("items" -> jsArray))
+                case jsBoolean: JsBoolean if jsBoolean.value => Some(Json.obj())
+                case _                                       => None
               }
+              .map(read(_, name))
 
             result
 
@@ -186,6 +203,8 @@ object CachingReferenceResolver {
 
     override def listKnownUri: List[URI] =
       rootUri :: upstreamResolver.map(_.listKnownUri).getOrElse(Nil)
+
+    override def toString: String = s"CachingReferenceResolver for $rootUri"
   }
 }
 
@@ -231,5 +250,7 @@ object MultiSourceReferenceResolver {
 
       override def listKnownUri: List[URI] =
         resolvers.flatMap(_.listKnownUri).toList ::: upstreamResolver.map(_.listKnownUri).getOrElse(Nil)
+
+      override def toString: String = s"MultiSourceReferenceResolver of size [${schemaSources.size}]"
     }
 }

@@ -31,6 +31,20 @@ case class TypeDefinition(
 
 object TypeDefinition {
 
+  def changeName(newName: String, typeDef: TypeDefinition): TypeDefinition =
+    modifyNestedPaths(typeDef, newName, 0).copy(name = newName)
+
+  def modifyNestedPaths(typeDef: TypeDefinition, newName: String, pos: Int): TypeDefinition = {
+    val modifiedNestedTypes = typeDef.nestedTypes
+      .map(modifyNestedPaths(_, newName, pos + 1))
+      .map(t => t.copy(path = replacePathElement(t.path, newName, pos)))
+    typeDef.copy(nestedTypes = modifiedNestedTypes)
+  }
+
+  def replacePathElement(path: List[String], element: String, pos: Int): List[String] =
+    if (pos < path.length) path.take(pos) ::: element :: path.drop(pos + 1)
+    else path
+
   def modifyPath(fx: List[String] => List[String])(typeDef: TypeDefinition): TypeDefinition = {
     val modifiedNestedTypes = typeDef.nestedTypes.map(modifyPath(fx))
     val modifiedInterfaces = typeDef.interfaces.map(modifyPath(fx))

@@ -43,7 +43,7 @@ class ScalaCodeGeneratorMoreSpec
   override def afterAll(): Unit =
     compiler.cleanup()
 
-  "JsonSchema2ScalaCodeRenderer" should {
+  "Generate from known schemas - part 2" should {
     unverifiedTestSchemas
     //.filter(_.name.startsWith("appveyor"))
       .foreach { schema: SchemaSource =>

@@ -43,7 +43,8 @@ class ScalaCodeGeneratorSpec
   override def afterAll(): Unit =
     compiler.cleanup()
 
-  "JsonSchema2ScalaCodeRenderer" should {
+  "Generate from snippets" should {
+
     "fail generating from simple schema of primitive type" in
       assertRenderingFails("""
                              |{
@@ -51,7 +52,7 @@ class ScalaCodeGeneratorSpec
                              |  "description": "A test schema",
                              |  "type": "string"
                              |}
-                               """.stripMargin)
+        """.stripMargin)
 
     "generate from simple schema into a case class without body and no companion object" in
       assertCanParseAndCompile("""
@@ -72,7 +73,7 @@ class ScalaCodeGeneratorSpec
                                  |  },
                                  |  "required": [ "aba" ]
                                  |}
-                             """.stripMargin)
+        """.stripMargin)
 
     "generate from simple schema with cyclic self-reference" in
       assertCanParseAndCompile("""
@@ -92,7 +93,7 @@ class ScalaCodeGeneratorSpec
                                  |    }
                                  |  }
                                  |}
-                               """.stripMargin)
+        """.stripMargin)
 
     "generate from schema having deeply nested objects" in
       assertCanParseAndCompile("""
@@ -153,7 +154,7 @@ class ScalaCodeGeneratorSpec
                                  |  },
                                  |  "required": [ "one", "third" ]
                                  |}
-                               """.stripMargin)
+        """.stripMargin)
 
     "generate from simple schema of an object having array of primitives" in
       assertCanParseAndCompile("""
@@ -175,7 +176,7 @@ class ScalaCodeGeneratorSpec
                                  |  },
                                  |  "required": [ "one" ]
                                  |}
-                               """.stripMargin)
+        """.stripMargin)
 
     "generate from simple schema of an object having array of objects" in
       assertCanParseAndCompile("""
@@ -243,7 +244,7 @@ class ScalaCodeGeneratorSpec
                                  |  },
                                  |  "required": [ "second" ]
                                  |}
-                               """.stripMargin)
+        """.stripMargin)
 
     "generate from simple object schema containing oneOf alternative object values" in
       assertCanParseAndCompile("""
@@ -287,7 +288,7 @@ class ScalaCodeGeneratorSpec
                                  |  },
                                  |  "required": [ "aba" ]
                                  |}
-                               """.stripMargin)
+        """.stripMargin)
 
     "generate from top level oneOf schema" in
       assertCanParseAndCompile("""{
@@ -304,9 +305,6 @@ class ScalaCodeGeneratorSpec
                                  |        "foo": {
                                  |          "type": "integer"
                                  |        },
-                                 |        "ver": {
-                                 |          "type": "number"
-                                 |        },
                                  |        "ref": {
                                  |          "$ref": "#/$defs/one"
                                  |        }
@@ -318,9 +316,6 @@ class ScalaCodeGeneratorSpec
                                  |      "properties": {
                                  |        "foo": {
                                  |          "type": "integer"
-                                 |        },
-                                 |        "ver": {
-                                 |          "type": "string"
                                  |        }
                                  |      }
                                  |    }
@@ -358,7 +353,7 @@ class ScalaCodeGeneratorSpec
                                  |  },
                                  |  "required": [ "one" ]
                                  |}
-                               """.stripMargin)
+        """.stripMargin)
 
     "generate from schema with internal references" in
       assertCanParseAndCompile("""{
@@ -582,8 +577,55 @@ class ScalaCodeGeneratorSpec
                                  |  }
                                  |}""".stripMargin)
 
+    "generate from schema when type's array and object, and array of many types" in
+      assertCanParseAndCompile("""{
+                                 |  "$id": "http://example.com/test.json",
+                                 |  "description": "A test schema",
+                                 |  "type": "object",
+                                 |  "properties": {
+                                 |    "item": {
+                                 |      "type": [ "array", "boolean", "object", "string" ],
+                                 |      "properties": {
+                                 |        "one": { "type": "string" }
+                                 |      },
+                                 |      "items": {
+                                 |        "type": [ "boolean", "integer", "null", "number", "object", "string" ]
+                                 |      }
+                                 |    }
+                                 |  }
+                                 |}""".stripMargin)
+
+    "generate from top level array schema" in
+      assertCanParseAndCompile("""{
+                                 |  "$id": "http://example.com/test.json",
+                                 |  "description": "A test schema",
+                                 |  "items": {
+                                 |    "anyOf": [
+                                 |      {
+                                 |        "type": "object",
+                                 |        "properties": {
+                                 |          "one": {
+                                 |            "type": "string"
+                                 |          }
+                                 |        }
+                                 |      },
+                                 |      {
+                                 |        "type": "object",
+                                 |        "properties": {
+                                 |          "second": {
+                                 |            "type": "string"
+                                 |          }
+                                 |        }
+                                 |      }
+                                 |    ]
+                                 |  }
+                                 |}""".stripMargin)
+  }
+
+  "Generate from known schemas" should {
+
     verifiedTestSchemas
-      .filter(_.name == "jdt.json")
+    //.filter(_.name == "ansible-stable-2.0.json")
       .foreach { schema: SchemaSource =>
         s"generate from ${schema.name}" in assertCanParseAndCompile(schema, verifiedTestSchemas)
       }

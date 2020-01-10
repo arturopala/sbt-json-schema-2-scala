@@ -245,7 +245,8 @@ object SchemaReader {
           ExternalSchemaReference(p.a, reference = reference, referencedSchema, p.requiredFields)
 
       case None =>
-        throw new IllegalStateException(s"Cannot resolve schema reference $reference when at ${p.currentUri}")
+        throw new IllegalStateException(
+          s"Cannot resolve schema reference $reference (resolved as $uri) at ${p.referenceResolver}")
     }
   }
 
