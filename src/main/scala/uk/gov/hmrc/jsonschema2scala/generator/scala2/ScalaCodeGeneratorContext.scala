@@ -91,6 +91,8 @@ object ScalaCodeGeneratorContext {
           mapSchema.patternProperties.flatMap(mapCommonVals)
         case oneOfSchema: OneOfAnyOfSchema =>
           oneOfSchema.variants.flatMap(mapCommonVals)
+        case allOfSchema: AllOfSchema =>
+          allOfSchema.variants.flatMap(mapCommonVals)
         case arraySchema: ArraySchema =>
           arraySchema.items.map(_.flatMap(mapCommonVals)).getOrElse(Seq.empty)
         case _ => Seq.empty

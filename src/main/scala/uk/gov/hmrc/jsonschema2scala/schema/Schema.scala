@@ -167,6 +167,17 @@ case class OneOfAnyOfSchema(
   override val validated: Boolean = variants.nonEmpty
 }
 
+case class AllOfSchema(
+  attributes: SchemaAttributes,
+  variants: Seq[Schema] = Seq.empty,
+  requiredFields: Seq[String] = Seq.empty,
+  aggregatedSchema: Schema)
+    extends Schema {
+
+  override val primitive: Boolean = aggregatedSchema.primitive
+  override val validated: Boolean = variants.nonEmpty
+}
+
 case class NotSchema(attributes: SchemaAttributes, schema: Schema) extends Schema {
 
   override val primitive: Boolean = schema.primitive

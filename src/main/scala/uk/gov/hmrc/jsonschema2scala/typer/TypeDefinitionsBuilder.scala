@@ -74,6 +74,7 @@ object TypeDefinitionsBuilder {
     val types: Seq[TypeDefinition] = schema match {
       case objectSchema: ObjectSchema        => processObjectSchema(name, path, objectSchema)
       case oneOfSchema: OneOfAnyOfSchema     => templates ++ processOneOfAnyOfSchema(name, path, oneOfSchema)
+      case allOfSchema: AllOfSchema          => templates ++ processAllOfSchema(name, path, allOfSchema)
       case notSchema: NotSchema              => templates ++ processSchema(name, path, notSchema.schema)
       case arraySchema: ArraySchema          => templates ++ processArraySchema(name, path, arraySchema)
       case mapSchema: MapSchema              => templates ++ processMapSchema(name, path, mapSchema)
@@ -201,6 +202,10 @@ object TypeDefinitionsBuilder {
     nonArrayTypeDefinitions ++ arrayTypeDefinitions
   }
 
+  def processAllOfSchema(name: String, path: List[String], allOfSchema: AllOfSchema)(
+    implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] =
+    processSchema(name, path, allOfSchema.aggregatedSchema)
+
   def processArraySchema(name: String, path: List[String], arraySchema: ArraySchema)(
     implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] =
     arraySchema.items.toSeq
@@ -229,6 +234,9 @@ object TypeDefinitionsBuilder {
           if oneOfAnyOfSchema.variants.collect { case _: ObjectSchema => }.nonEmpty =>
         oneOfAnyOfSchema.variants.collect { case o: ObjectSchema => o }.flatMap(calculateExternalImports)
 
+      case allOfSchema: AllOfSchema if allOfSchema.variants.collect { case _: ObjectSchema => }.nonEmpty =>
+        allOfSchema.variants.collect { case o: ObjectSchema => o }.flatMap(calculateExternalImports)
+
       case arraySchema: ArraySchema if arraySchema.items.exists(_.isInstanceOf[ExternalSchemaReference]) =>
         Set(typeNameProvider.toTypeName(arraySchema.items.asInstanceOf[ObjectSchema]))
 
@@ -246,6 +254,7 @@ object TypeDefinitionsBuilder {
     case mapSchema: MapSchema =>
       mapSchema.definitions.exists(declaresType) || mapSchema.patternProperties.exists(declaresType)
     case oneOfAnyOfSchema: OneOfAnyOfSchema => oneOfAnyOfSchema.variants.exists(declaresType)
+    case allOfSchema: AllOfSchema           => declaresType(allOfSchema.aggregatedSchema)
     case notSchema: NotSchema               => declaresType(notSchema.schema)
     case reference: ExternalSchemaReference => declaresType(reference.schema)
     case _                                  => false

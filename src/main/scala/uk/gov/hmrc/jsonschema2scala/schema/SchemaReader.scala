@@ -322,19 +322,37 @@ object SchemaReader {
                   s"Invalid schema, allOf array element must be valid schema object, but got $other")
             }
           case many =>
-            val mergedJson = array.value.foldLeft(Json.obj())((a, v) =>
-              v match {
-                case json: JsObject => {
-                  val dereferenced: JsObject = deepDereference(json, p.referenceResolver)
-                  a.deepMerge(dereferenced)
-                }
-                case other =>
-                  throw new IllegalStateException(
-                    s"Invalid schema, allOf array element must be valid schema object, but got $other")
-            })
-            val schema =
+            val variants: Seq[Schema] = array.value.zipWithIndex.map {
+              case (jsObject: JsObject, i) =>
+                readSchema(
+                  p.name,
+                  i.toString :: p.path,
+                  jsObject,
+                  requiredFields = p.requiredFields,
+                  currentReferenceResolver = p.referenceResolver)
+
+              case (other, i) =>
+                throw new IllegalStateException(s"Invalid allOf schema, expected ${p.path.reverse
+                  .mkString("/")}[$i] to be an object, but got ${other.getClass.getSimpleName}.")
+            }
+
+            val aggregatedSchema: Schema = {
+
+              val mergedJson = array.value.foldLeft(Json.obj())((a, v) =>
+                v match {
+                  case json: JsObject => {
+                    val dereferenced: JsObject = deepDereference(json, p.referenceResolver)
+                    a.deepMerge(dereferenced)
+                  }
+                  case other =>
+                    throw new IllegalStateException(
+                      s"Invalid schema, allOf array element must be valid schema object, but got $other")
+              })
+
               readSchema(p.name, "allOf" :: p.path, mergedJson, p.description, p.requiredFields, p.referenceResolver)
-            schema.withDefinitions(schema.definitions ++ p.definitions)
+            }
+
+            AllOfSchema(p.a, variants, p.requiredFields, aggregatedSchema)
         }
       }
 
@@ -513,6 +531,9 @@ object SchemaReader {
         case 1 => extractAdditionalProperties(nonPrimitive.head)
         case _ => Seq(oneOfAnyOfSchema)
       }
+
+    case allOfSchema: AllOfSchema =>
+      extractAdditionalProperties(allOfSchema.aggregatedSchema)
 
     case other => Seq(other) // we might want to support more cases if needed
   }

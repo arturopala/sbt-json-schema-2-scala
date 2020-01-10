@@ -53,6 +53,8 @@ object SchemaUtils {
         s.copy(attributes = newAttributes)
       case s: OneOfAnyOfSchema =>
         s.copy(attributes = newAttributes)
+      case s: AllOfSchema =>
+        s.copy(attributes = newAttributes)
       case s: NotSchema =>
         s.copy(attributes = newAttributes)
       case s: IfThenElseSchema =>

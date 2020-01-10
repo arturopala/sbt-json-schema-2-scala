@@ -80,6 +80,9 @@ class ScalaTypeResolver(
         } else "Any"
       }
 
+      case allOfSchema: AllOfSchema =>
+        typeOf(allOfSchema.aggregatedSchema, viewpoint, wrapAsOption = false)
+
       case not: NotSchema => typeOf(not.schema, viewpoint, wrapAsOption = false)
 
       case ite: IfThenElseSchema =>
