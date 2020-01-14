@@ -31,20 +31,20 @@ object SchemaReader {
 
   def read(name: String, json: JsObject, otherSchemas: Seq[SchemaSource]): Schema = {
     val uri = attemptReadId(json).getOrElse(URI.create(name))
-    read(uri, name, json, Some(MultiSourceReferenceResolver(otherSchemas)))
+    read(uri, name, json, Some(SchemaReferenceResolver(otherSchemas)))
   }
 
   def read(uri: URI, name: String, json: JsObject, otherSchemas: Seq[SchemaSource]): Schema =
-    read(uri, name, json, Some(MultiSourceReferenceResolver(otherSchemas)))
+    read(uri, name, json, Some(SchemaReferenceResolver(otherSchemas)))
 
   def readMany(sources: Seq[SchemaSource]): Seq[Schema] =
     sources.map(source =>
-      source.json.fold(throw _, read(source.uri, source.name, _, Some(MultiSourceReferenceResolver(sources)))))
+      source.json.fold(throw _, read(source.uri, source.name, _, Some(SchemaReferenceResolver(sources)))))
 
   def read(uri: URI, name: String, json: JsObject, externalResolver: Option[SchemaReferenceResolver] = None): Schema = {
-    val resolver = CachingReferenceResolver(uri, name, json, externalResolver)
+    val resolver = SchemaReferenceResolver(uri, name, json, externalResolver)
     val path = SchemaReferenceResolver.rootPath(uri)
-    resolver.lookupSchema(uri, (_, j, r) => readSchema(name, path, j, None, Seq.empty, r)) match {
+    resolver.lookupSchema(uri, (_, j, r) => readSchema(name, path, j, None, Seq.empty, r, true)) match {
       case None =>
         throw new IllegalStateException(s"Unexpected error, schema lookup failed for $uri")
 
@@ -61,7 +61,8 @@ object SchemaReader {
     custom: Option[Map[String, JsValue]],
     json: JsObject,
     requiredFields: Seq[String],
-    referenceResolver: SchemaReferenceResolver) {
+    referenceResolver: SchemaReferenceResolver,
+    processDefinitions: Boolean) {
 
     val a: SchemaAttributes =
       SchemaAttributes(name, path, description, definitions, required, custom)
@@ -81,7 +82,8 @@ object SchemaReader {
     value: JsValue,
     externalDescription: Option[String] = None,
     requiredFields: Seq[String],
-    currentReferenceResolver: SchemaReferenceResolver): Schema = value match {
+    currentReferenceResolver: SchemaReferenceResolver,
+    processDefinitions: Boolean): Schema = value match {
 
     case boolean: JsBoolean =>
       boolean.value match {
@@ -103,8 +105,11 @@ object SchemaReader {
 
       val description: Option[String] = externalDescription.orElse(attemptReadDescription(json))
 
-      val definitions: Seq[Schema] = readDefinitions("definitions", name, path, json, description, referenceResolver) ++
-        readDefinitions("$defs", name, path, json, description, referenceResolver)
+      val definitions: Seq[Schema] =
+        if (processDefinitions)
+          readDefinitions("definitions", name, path, json, description, referenceResolver) ++
+            readDefinitions("$defs", name, path, json, description, referenceResolver)
+        else Seq.empty
 
       val custom: Option[Map[String, JsValue]] = {
         val set = keywordsNotInVocabulary(json.fields)
@@ -112,7 +117,17 @@ object SchemaReader {
       }
 
       val p =
-        Parameters(name, path, description, definitions, isMandatory, custom, json, requiredFields, referenceResolver)
+        Parameters(
+          name,
+          path,
+          description,
+          definitions,
+          isMandatory,
+          custom,
+          json,
+          requiredFields,
+          referenceResolver,
+          processDefinitions)
 
       attemptReadExplicitType(p)
         .orElse { attemptReadReference(p) }
@@ -202,8 +217,8 @@ object SchemaReader {
           case "number"  => readNumberSchema(p)
           case "integer" => readIntegerSchema(p)
           case "boolean" => readBooleanSchema(p)
-          case "object"  => readObjectSchema(p.copy(path = "!object" :: p.path))
-          case "array"   => readArraySchema(p.copy(path = "!array" :: p.path))
+          case "object"  => readObjectSchema(p)
+          case "array"   => readArraySchema(p)
           case "null"    => NullSchema(p.a)
           case other =>
             throw new IllegalStateException(
@@ -229,20 +244,21 @@ object SchemaReader {
   def resolveReference(p: Parameters, reference: String): Schema = {
 
     val uri: URI = p.referenceResolver.resolveUri(URI.create(reference))
-
     val path2 = p.referenceResolver.uriToPath(uri)
 
     p.referenceResolver
-      .lookupSchema(uri, readSchema(_, path2, _, externalDescription = p.description, p.requiredFields, _)) match {
+      .lookupSchema(
+        uri,
+        readSchema(_, path2, _, externalDescription = p.description, p.requiredFields, _, processDefinitions = true)) match {
 
       case Some(referencedSchema) =>
         if (p.referenceResolver.isInternal(referencedSchema.uri)) {
           if (referencedSchema.primitive)
             SchemaUtils.copy(referencedSchema, p.name, "$ref" :: p.path, p.description)
           else
-            InternalSchemaReference(p.a, reference, referencedSchema, p.requiredFields)
+            InternalSchemaReference(p.a, uri.toString, referencedSchema, p.requiredFields)
         } else
-          ExternalSchemaReference(p.a, reference = reference, referencedSchema, p.requiredFields)
+          ExternalSchemaReference(p.a, uri.toString, referencedSchema, p.requiredFields)
 
       case None =>
         throw new IllegalStateException(
@@ -281,21 +297,33 @@ object SchemaReader {
     array: JsArray,
     alternativeRequiredFields: Seq[Set[String]],
     isOneOf: Boolean): OneOfAnyOfSchema = {
-    val variants = array.value.zipWithIndex.map {
-      case (jsObject: JsObject, i) =>
-        readSchema(
-          p.name,
-          i.toString :: p.path,
-          jsObject,
-          requiredFields = p.requiredFields,
-          currentReferenceResolver = p.referenceResolver)
 
-      case (other, i) =>
+    def readVariants(path: List[String]): JsValue => Seq[Schema] = {
+      case jsObject: JsObject =>
+        Seq(
+          readSchema(
+            p.name,
+            path,
+            jsObject,
+            requiredFields = p.requiredFields,
+            currentReferenceResolver = p.referenceResolver,
+            processDefinitions = p.processDefinitions))
+
+      case jsArray: JsArray =>
+        jsArray.value.zipWithIndex.flatMap { case (s, i) => readVariants(i.toString :: p.path)(s) }
+
+      case other =>
         throw new IllegalStateException(s"Invalid ${if (isOneOf) "oneOf" else "anyOf"} schema, expected ${p.path.reverse
-          .mkString("/")}[$i] to be an object, but got ${other.getClass.getSimpleName}.")
+          .mkString("/")} to be an object or array, but got ${other.getClass.getSimpleName}.")
     }
+
+    val variants = array.value.zipWithIndex.flatMap { case (s, i) => readVariants(i.toString :: p.path)(s) }
+
     OneOfAnyOfSchema(p.a, variants, alternativeRequiredFields, isOneOf)
   }
+
+  val keywordsToRemoveWhenMergingSchema: Set[String] =
+    Set(Keywords.definitions, Keywords.`$defs`, Keywords.`$id`)
 
   def attemptReadAllOf(p: Parameters): Option[Schema] =
     (p.json \ "allOf")
@@ -304,23 +332,25 @@ object SchemaReader {
         array.value.length match {
           case 0 =>
             throw new IllegalStateException("Invalid schema, allOf array must not be empty.")
+
           case 1 =>
             array.value.head match {
-              case json: JsObject =>
+              case jsObject: JsObject =>
                 val schema = readSchema(
                   p.name,
-                  "0" :: "allOf" :: p.path,
-                  json,
-                  p.description,
-                  p.requiredFields,
-                  p.referenceResolver)
-
-                schema.withDefinitions(schema.definitions ++ p.definitions)
+                  "0" :: p.path,
+                  jsObject,
+                  requiredFields = p.requiredFields,
+                  currentReferenceResolver = p.referenceResolver,
+                  processDefinitions = p.processDefinitions
+                )
+                AllOfSchema(p.a, Seq.empty, p.requiredFields, schema)
 
               case other =>
-                throw new IllegalStateException(
-                  s"Invalid schema, allOf array element must be valid schema object, but got $other")
+                throw new IllegalStateException(s"Invalid allOf schema, expected ${p.path.reverse
+                  .mkString("/")}/0 to be an object, but got ${other.getClass.getSimpleName}.")
             }
+
           case many =>
             val variants: Seq[Schema] = array.value.zipWithIndex.map {
               case (jsObject: JsObject, i) =>
@@ -329,27 +359,64 @@ object SchemaReader {
                   i.toString :: p.path,
                   jsObject,
                   requiredFields = p.requiredFields,
-                  currentReferenceResolver = p.referenceResolver)
+                  currentReferenceResolver = p.referenceResolver,
+                  processDefinitions = p.processDefinitions
+                )
 
               case (other, i) =>
                 throw new IllegalStateException(s"Invalid allOf schema, expected ${p.path.reverse
-                  .mkString("/")}[$i] to be an object, but got ${other.getClass.getSimpleName}.")
+                  .mkString("/")}/$i to be an object, but got ${other.getClass.getSimpleName}.")
+            }
+
+            val compositeReferenceResolver: SchemaReferenceResolver = {
+
+              val resolvers: Seq[SchemaReferenceResolver] = array.value.flatMap {
+                case jsObject: JsObject => SchemaUtils.collectSchemaReferenceResolvers(jsObject, p.referenceResolver)
+                case _                  => Seq.empty
+              }.distinct
+
+              if (resolvers.size > 1)
+                new MultiReferenceResolver(resolvers, internal = true, upstreamResolver = None)
+              else
+                resolvers.head
             }
 
             val aggregatedSchema: Schema = {
 
-              val mergedJson = array.value.foldLeft(Json.obj())((a, v) =>
-                v match {
-                  case json: JsObject => {
-                    val dereferenced: JsObject = deepDereference(json, p.referenceResolver)
-                    a.deepMerge(dereferenced)
-                  }
-                  case other =>
-                    throw new IllegalStateException(
-                      s"Invalid schema, allOf array element must be valid schema object, but got $other")
-              })
+              val mergedJson = array.value.zipWithIndex.foldLeft(Json.obj()) {
+                case (a, (v, i)) =>
+                  v match {
+                    case json: JsObject => {
+                      SchemaUtils
+                        .dereferenceSchema(
+                          json,
+                          i.toString :: "allOf" :: p.path,
+                          p.referenceResolver,
+                          keywordsToRemoveWhenMergingSchema) match {
 
-              readSchema(p.name, "allOf" :: p.path, mergedJson, p.description, p.requiredFields, p.referenceResolver)
+                        case jsObject: JsObject =>
+                          a.deepMerge(jsObject)
+
+                        case other =>
+                          throw new IllegalStateException(
+                            s"Unexpected schema type after dereference: ${other.getClass.getSimpleName}")
+                      }
+
+                    }
+                    case other =>
+                      throw new IllegalStateException(
+                        s"Invalid schema, allOf array element must be valid schema object, but got $other")
+                  }
+              }
+
+              readSchema(
+                p.name,
+                "allOf" :: p.path,
+                mergedJson,
+                p.description,
+                p.requiredFields,
+                compositeReferenceResolver,
+                processDefinitions = false)
             }
 
             AllOfSchema(p.a, variants, p.requiredFields, aggregatedSchema)
@@ -361,7 +428,14 @@ object SchemaReader {
       .asOpt[JsObject]
       .map { json =>
         val schema: Schema =
-          readSchema(p.name, "not" :: p.path, json, p.description, p.requiredFields, p.referenceResolver)
+          readSchema(
+            p.name,
+            "not" :: p.path,
+            json,
+            p.description,
+            p.requiredFields,
+            p.referenceResolver,
+            p.processDefinitions)
         NotSchema(p.a, schema)
       }
 
@@ -373,35 +447,41 @@ object SchemaReader {
           .asOpt[JsObject]
           .map { thenJson =>
             val condition: Schema =
-              readSchema(p.name, "if" :: p.path, ifJson, p.description, p.requiredFields, p.referenceResolver)
+              readSchema(
+                p.name,
+                "if" :: p.path,
+                ifJson,
+                p.description,
+                p.requiredFields,
+                p.referenceResolver,
+                p.processDefinitions)
 
             val schema: Schema =
-              readSchema(p.name, "then" :: p.path, thenJson, p.description, p.requiredFields, p.referenceResolver)
+              readSchema(
+                p.name,
+                "then" :: p.path,
+                thenJson,
+                p.description,
+                p.requiredFields,
+                p.referenceResolver,
+                p.processDefinitions)
 
             val elseSchema: Option[Schema] = (p.json \ "else")
               .asOpt[JsObject]
               .map { elseJson =>
-                readSchema(p.name, "else" :: p.path, elseJson, p.description, p.requiredFields, p.referenceResolver)
+                readSchema(
+                  p.name,
+                  "else" :: p.path,
+                  elseJson,
+                  p.description,
+                  p.requiredFields,
+                  p.referenceResolver,
+                  p.processDefinitions)
               }
 
             IfThenElseSchema(p.a, condition, schema, elseSchema)
           }
       }
-
-  def deepDereference(json: JsObject, referenceResolver: SchemaReferenceResolver): JsObject =
-    (json \ "$ref")
-      .asOpt[String]
-      .map(ref => referenceResolver.resolveUri(URI.create(ref)))
-      .flatMap(referenceResolver.lookupJson)
-      .map {
-        case (json2: JsObject, resolver) =>
-          deepDereference(json2, resolver)
-
-        case other =>
-          throw new IllegalStateException(
-            s"Invalid schema, expected $$ref target to be a valid schema object, but got $other")
-      }
-      .getOrElse(json)
 
   def readObjectSchema(p: Parameters): Schema = {
 
@@ -453,7 +533,9 @@ object SchemaReader {
                   currentPath = name :: "properties" :: p.path,
                   value = fieldProperty,
                   requiredFields = p.requiredFields,
-                  currentReferenceResolver = p.referenceResolver)
+                  currentReferenceResolver = p.referenceResolver,
+                  processDefinitions = p.processDefinitions
+                )
 
               case boolean: JsBoolean =>
                 readSchema(
@@ -461,7 +543,9 @@ object SchemaReader {
                   currentPath = name :: "properties" :: p.path,
                   value = boolean,
                   requiredFields = p.requiredFields,
-                  currentReferenceResolver = p.referenceResolver)
+                  currentReferenceResolver = p.referenceResolver,
+                  processDefinitions = p.processDefinitions
+                )
 
               case other =>
                 throw new IllegalStateException(
@@ -485,7 +569,8 @@ object SchemaReader {
                     currentPath = pattern :: "patternProperties" :: p.path,
                     value = fieldProperty,
                     requiredFields = p.requiredFields,
-                    currentReferenceResolver = p.referenceResolver
+                    currentReferenceResolver = p.referenceResolver,
+                    processDefinitions = p.processDefinitions
                   )
 
                 case boolean: JsBoolean =>
@@ -494,7 +579,8 @@ object SchemaReader {
                     currentPath = pattern :: "patternProperties" :: p.path,
                     value = boolean,
                     requiredFields = p.requiredFields,
-                    currentReferenceResolver = p.referenceResolver
+                    currentReferenceResolver = p.referenceResolver,
+                    processDefinitions = p.processDefinitions
                   )
 
                 case other =>
@@ -514,7 +600,9 @@ object SchemaReader {
             currentPath = "additionalProperties" :: p.path,
             value = property,
             requiredFields = p.requiredFields,
-            currentReferenceResolver = p.referenceResolver))
+            currentReferenceResolver = p.referenceResolver,
+            processDefinitions = p.processDefinitions
+          ))
           .map(extractAdditionalProperties)
 
       case _ => None
@@ -555,13 +643,14 @@ object SchemaReader {
       .flatMap({
         case itemSchema: JsObject =>
           Some(
-            Seq(
-              readSchema(
-                NameUtils.singular(p.name),
-                "items" :: p.path,
-                itemSchema,
-                requiredFields = Seq(p.name),
-                currentReferenceResolver = p.referenceResolver)))
+            Seq(readSchema(
+              NameUtils.singular(p.name),
+              "items" :: p.path,
+              itemSchema,
+              requiredFields = Seq(p.name),
+              currentReferenceResolver = p.referenceResolver,
+              processDefinitions = p.processDefinitions
+            )))
 
         case array: JsArray =>
           array.value.toList match {
@@ -574,7 +663,9 @@ object SchemaReader {
                     "0" :: "items" :: p.path,
                     json,
                     requiredFields = Seq(p.name),
-                    currentReferenceResolver = p.referenceResolver)
+                    currentReferenceResolver = p.referenceResolver,
+                    processDefinitions = p.processDefinitions
+                  )
 
                 case other =>
                   throw new IllegalStateException(
@@ -611,7 +702,7 @@ object SchemaReader {
               }
               val path2 = referenceResolver.uriToPath(uri)
               referenceResolver
-                .lookupSchema(uri, readSchema(_, path2, _, description, Seq.empty, _))
+                .lookupSchema(uri, readSchema(_, path2, _, description, Seq.empty, _, processDefinitions = true))
             })
             .collect { case Some(x) => x }
       )
@@ -749,7 +840,7 @@ object SchemaReader {
     id: Option[URI]): (SchemaReferenceResolver, List[String]) =
     id.map { uri =>
         val uri2 = if (uri.isAbsolute) uri else referenceResolver.resolveUri(uri)
-        (CachingReferenceResolver(uri2, name, json, Some(referenceResolver)), SchemaReferenceResolver.rootPath(uri))
+        (SchemaReferenceResolver(uri2, name, json, Some(referenceResolver)), SchemaReferenceResolver.rootPath(uri))
       }
       .getOrElse((referenceResolver, path))
 

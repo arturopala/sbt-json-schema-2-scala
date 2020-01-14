@@ -21,6 +21,7 @@ import uk.gov.hmrc.jsonschema2scala.schema._
 object TypeDefinitionsBuilder {
 
   def buildFrom(schema: Schema)(implicit typeNameProvider: TypeNameProvider): Either[List[String], TypeDefinition] = {
+
     val name = typeNameProvider.toTypeName(schema)
     val types = TypeDefinitionsBuilder
       .processSchema(name, Nil, schema)
@@ -36,15 +37,13 @@ object TypeDefinitionsBuilder {
 
         case Some(typeDef) => {
 
-          val typeDef2 = TypeDefinition.modifyPath(_.dropRight(1))(typeDef)
-
-          val embeddedTypes: Seq[TypeDefinition] = types
+          val movingTypes: Seq[TypeDefinition] = types
             .filterNot(_ == typeDef)
             .map(TypeDefinition.modifyPath(prependNameIfMissing(typeDef.name)))
 
           Right(
-            typeDef2
-              .copy(nestedTypes = typeDef2.nestedTypes ++ embeddedTypes))
+            typeDef
+              .copy(nestedTypes = typeDef.nestedTypes ++ movingTypes))
         }
 
         case None =>
@@ -69,7 +68,7 @@ object TypeDefinitionsBuilder {
     implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] = {
 
     lazy val templates: Seq[TypeDefinition] =
-      processTemplates(path.headOption.getOrElse(name), safeTail(path), schema)
+      processTemplates(path, schema)
 
     val types: Seq[TypeDefinition] = schema match {
       case objectSchema: ObjectSchema        => processObjectSchema(name, path, objectSchema)
@@ -105,12 +104,12 @@ object TypeDefinitionsBuilder {
     case _ => Seq.empty
   }
 
-  def processTemplates(name: String, path: List[String], schema: Schema)(
+  def processTemplates(path: List[String], schema: Schema)(
     implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] =
     schema.definitions
       .flatMap { schema =>
         val childTypeName = typeNameProvider.toTypeName(schema)
-        processSchema(childTypeName, name :: path, schema)
+        processSchema(childTypeName, path, schema)
       }
       .sortBy(_.name)
 
@@ -121,7 +120,7 @@ object TypeDefinitionsBuilder {
       if (objectSchema.properties.exists(_.name == name)) s"_$name" else name
     }
 
-    val templates: Seq[TypeDefinition] = processTemplates(typeName, path, objectSchema)
+    val templates: Seq[TypeDefinition] = processTemplates(typeName :: path, objectSchema)
 
     val nestedTypeDefinitions: Seq[TypeDefinition] =
       objectSchema.properties.flatMap { schema =>
@@ -203,8 +202,12 @@ object TypeDefinitionsBuilder {
   }
 
   def processAllOfSchema(name: String, path: List[String], allOfSchema: AllOfSchema)(
-    implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] =
-    processSchema(name, path, allOfSchema.aggregatedSchema)
+    implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] = {
+
+    val templates = allOfSchema.variants.flatMap(processTemplates(name :: path, _))
+
+    templates ++ processSchema(name, path, allOfSchema.aggregatedSchema)
+  }
 
   def processArraySchema(name: String, path: List[String], arraySchema: ArraySchema)(
     implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] =

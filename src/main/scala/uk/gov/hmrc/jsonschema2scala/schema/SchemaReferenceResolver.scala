@@ -43,6 +43,29 @@ trait SchemaReferenceResolver {
 
 object SchemaReferenceResolver {
 
+  def apply(
+    rootUri: URI,
+    schemaName: String,
+    schema: JsObject,
+    upstreamResolver: Option[SchemaReferenceResolver]): SchemaReferenceResolver =
+    upstreamResolver match {
+      case Some(resolver @ CachingReferenceResolver(`rootUri`, _, _, _)) =>
+        resolver
+
+      case _ =>
+        new CachingReferenceResolver(rootUri, schemaName, schema, upstreamResolver)
+    }
+
+  def apply(
+    schemaSources: Seq[SchemaSource],
+    upstreamResolver: Option[SchemaReferenceResolver] = None): SchemaReferenceResolver = {
+
+    val resolvers: Seq[SchemaReferenceResolver] =
+      schemaSources.map(s => s.json.fold(throw _, SchemaReferenceResolver(s.uri, s.name, _, None)))
+
+    new MultiReferenceResolver(resolvers, false, upstreamResolver)
+  }
+
   final def rootPath(uri: URI): List[String] = "#" :: uri.toString :: Nil
 
   def isFragmentOnly(uri: URI): Boolean =
@@ -92,165 +115,145 @@ object SchemaReferenceResolver {
 
 }
 
-object CachingReferenceResolver {
+case class CachingReferenceResolver(
+  rootUri: URI,
+  schemaName: String,
+  json: JsObject,
+  upstreamResolver: Option[SchemaReferenceResolver])
+    extends SchemaReferenceResolver {
 
   import SchemaReferenceResolver._
 
-  def apply(
-    rootUri: URI,
-    schemaName: String,
-    schema: JsObject,
-    upstreamResolver: Option[SchemaReferenceResolver]): SchemaReferenceResolver =
-    upstreamResolver match {
-      case Some(resolver @ CachingReferenceResolver(`rootUri`, _, _, _)) =>
-        resolver
-      case _ =>
-        CachingReferenceResolver(rootUri, schemaName, schema, upstreamResolver)
+  lazy val rootUriString: String = rootUri.toString
+
+  lazy val cache: mutable.Map[String, Schema] = collection.mutable.Map[String, Schema]()
+
+  override def lookupJson(uri: URI): Option[(JsValue, SchemaReferenceResolver)] = {
+
+    val isFragment: Boolean = SchemaReferenceResolver.isFragmentOnly(uri)
+    val (absolute, relative) = computeAbsoluteAndRelativeUriString(rootUri, uri)
+
+    {
+      if (isFragment || absolute.startsWith(rootUriString)) {
+
+        val jsonPointer: List[String] = toJsonPointer(relative)
+
+        val result: Option[JsValue] =
+          resolveJsonPointer(jsonPointer, uri)(json)
+            .asOpt[JsValue]
+
+        result
+          .map(v => (v, this))
+
+      } else None
+    }.orElse {
+      if (isFragment) None else upstreamResolver.flatMap(_.lookupJson(uri))
+    }
+  }
+
+  override def lookupSchema(uri: URI, reader: SchemaReader): Option[Schema] = {
+
+    val isFragmentOnly: Boolean = SchemaReferenceResolver.isFragmentOnly(uri)
+    val (absolute, relative) = computeAbsoluteAndRelativeUriString(rootUri, uri)
+
+    def read(jsObject: JsObject, name: String): Schema = {
+      // prevent cycles by caching a schema stub
+      val stub = SchemaStub(reader(name, emptyJsObject, this), absolute)
+      cache.update(absolute, stub)
+
+      val schema: Schema = reader(name, jsObject, this)
+
+      cache.update(absolute, schema)
+      schema
     }
 
-  case class CachingReferenceResolver(
-    rootUri: URI,
-    schemaName: String,
-    json: JsObject,
-    upstreamResolver: Option[SchemaReferenceResolver])
-      extends SchemaReferenceResolver {
-
-    lazy val rootUriString: String = rootUri.toString
-
-    lazy val cache: mutable.Map[String, Schema] = collection.mutable.Map[String, Schema]()
-
-    override def lookupJson(uri: URI): Option[(JsValue, SchemaReferenceResolver)] = {
-
-      val isFragment: Boolean = SchemaReferenceResolver.isFragmentOnly(uri)
-      val (absolute, relative) = computeAbsoluteAndRelativeUriString(rootUri, uri)
-
-      {
-        if (isFragment || absolute.startsWith(rootUriString)) {
+    cache
+      .get(absolute)
+      .orElse {
+        if (isFragmentOnly || absolute.startsWith(rootUriString)) {
 
           val jsonPointer: List[String] = toJsonPointer(relative)
 
-          val result: Option[JsValue] =
-            resolveJsonPointer(jsonPointer, uri)(json)
-              .asOpt[JsValue]
+          val name = if (jsonPointer.isEmpty) schemaName else jsonPointer.last
+
+          val result: Option[Schema] = resolveJsonPointer(jsonPointer, uri)(json)
+            .asOpt[JsValue]
+            .flatMap {
+              case jsObject: JsObject                      => Some(jsObject)
+              case jsArray: JsArray                        => Some(Json.obj("items" -> jsArray))
+              case jsBoolean: JsBoolean if jsBoolean.value => Some(Json.obj())
+              case _                                       => None
+            }
+            .map(read(_, name))
 
           result
-            .map(v => (v, this))
 
         } else None
-      }.orElse {
-        if (isFragment) None else upstreamResolver.flatMap(_.lookupJson(uri))
       }
-    }
-
-    override def lookupSchema(uri: URI, reader: SchemaReader): Option[Schema] = {
-
-      val isFragmentOnly: Boolean = SchemaReferenceResolver.isFragmentOnly(uri)
-      val (absolute, relative) = computeAbsoluteAndRelativeUriString(rootUri, uri)
-
-      def read(jsObject: JsObject, name: String): Schema = {
-        // prevent cycles by caching a schema stub
-        val stub = SchemaStub(reader(name, emptyJsObject, this), absolute)
-        cache.update(absolute, stub)
-
-        val schema: Schema = reader(name, jsObject, this)
-
-        cache.update(absolute, schema)
-        schema
+      .orElse {
+        if (isFragmentOnly) None else upstreamResolver.flatMap(_.lookupSchema(uri, reader))
       }
-
-      cache
-        .get(absolute)
-        .orElse {
-          if (isFragmentOnly || absolute.startsWith(rootUriString)) {
-
-            val jsonPointer: List[String] = toJsonPointer(relative)
-
-            val name = if (jsonPointer.isEmpty) schemaName else jsonPointer.last
-
-            val result: Option[Schema] = resolveJsonPointer(jsonPointer, uri)(json)
-              .asOpt[JsValue]
-              .flatMap {
-                case jsObject: JsObject                      => Some(jsObject)
-                case jsArray: JsArray                        => Some(Json.obj("items" -> jsArray))
-                case jsBoolean: JsBoolean if jsBoolean.value => Some(Json.obj())
-                case _                                       => None
-              }
-              .map(read(_, name))
-
-            result
-
-          } else None
-        }
-        .orElse {
-          if (isFragmentOnly) None else upstreamResolver.flatMap(_.lookupSchema(uri, reader))
-        }
-    }
-
-    override def uriToPath(uri: URI): List[String] = {
-      val (root, fragment) =
-        (
-          if (uri.isAbsolute) uri.toString.takeWhile(_ != '#') else rootUriString,
-          "#" + Option(uri.getFragment).getOrElse(""))
-      (root :: fragment.split("/").toList).reverse
-    }
-
-    override def isInternal(reference: String): Boolean = {
-      val uri2 = URI.create(reference)
-      !uri2.isAbsolute || sameOrigin(rootUri, uri2) || upstreamResolver.exists(_.isInternal(reference))
-    }
-
-    override def resolveUri(givenUri: URI): URI = rootUri.resolve(givenUri)
-
-    override def listKnownUri: List[URI] =
-      rootUri :: upstreamResolver.map(_.listKnownUri).getOrElse(Nil)
-
-    override def toString: String = s"CachingReferenceResolver for $rootUri"
   }
+
+  override def uriToPath(uri: URI): List[String] = {
+    val (root, fragment) =
+      (
+        if (uri.isAbsolute) uri.toString.takeWhile(_ != '#') else rootUriString,
+        "#" + Option(uri.getFragment).getOrElse(""))
+    (root :: fragment.split("/").toList).reverse
+  }
+
+  override def isInternal(reference: String): Boolean = {
+    val uri2 = URI.create(reference)
+    !uri2.isAbsolute || sameOrigin(rootUri, uri2) || upstreamResolver.exists(_.isInternal(reference))
+  }
+
+  override def resolveUri(givenUri: URI): URI = rootUri.resolve(givenUri)
+
+  override def listKnownUri: List[URI] =
+    rootUri :: upstreamResolver.map(_.listKnownUri).getOrElse(Nil)
+
+  override def toString: String = s"CachingReferenceResolver for $rootUri"
 }
 
-object MultiSourceReferenceResolver {
+class MultiReferenceResolver(
+  resolvers: Seq[SchemaReferenceResolver],
+  internal: Boolean,
+  upstreamResolver: Option[SchemaReferenceResolver])
+    extends SchemaReferenceResolver {
 
-  def apply(
-    schemaSources: Seq[SchemaSource],
-    upstreamResolver: Option[SchemaReferenceResolver] = None): SchemaReferenceResolver =
-    new SchemaReferenceResolver {
+  override def lookupJson(uri: URI): Option[(JsValue, SchemaReferenceResolver)] =
+    resolvers
+      .foldLeft[Option[(JsValue, SchemaReferenceResolver)]](None)(
+        (a, r) =>
+          a.orElse(
+            r.lookupJson(uri)
+        ))
+      .orElse(upstreamResolver.flatMap(_.lookupJson(uri)))
 
-      lazy val resolvers: Seq[SchemaReferenceResolver] =
-        schemaSources.map(s => s.json.fold(throw _, CachingReferenceResolver(s.uri, s.name, _, None)))
+  override def lookupSchema(uri: URI, reader: SchemaReader): Option[Schema] =
+    resolvers
+      .foldLeft[Option[Schema]](None)(
+        (a, r) =>
+          a.orElse(
+            r.lookupSchema(uri, reader)
+        ))
+      .orElse(upstreamResolver.flatMap(_.lookupSchema(uri, reader)))
 
-      override def lookupJson(uri: URI): Option[(JsValue, SchemaReferenceResolver)] =
-        resolvers
-          .foldLeft[Option[(JsValue, SchemaReferenceResolver)]](None)(
-            (a, r) =>
-              a.orElse(
-                r.lookupJson(uri)
-            ))
-          .orElse(upstreamResolver.flatMap(_.lookupJson(uri)))
+  override def uriToPath(uri: URI): List[String] = {
+    val (root, fragment) = (
+      if (uri.isAbsolute) uri.toString.takeWhile(_ != '#')
+      else "",
+      "#" + Option(uri.getFragment).getOrElse(""))
+    (root :: fragment.split("/").toList).reverse
+  }
 
-      override def lookupSchema(uri: URI, reader: SchemaReader): Option[Schema] =
-        resolvers
-          .foldLeft[Option[Schema]](None)(
-            (a, r) =>
-              a.orElse(
-                r.lookupSchema(uri, reader)
-            ))
-          .orElse(upstreamResolver.flatMap(_.lookupSchema(uri, reader)))
+  override def isInternal(reference: String): Boolean = internal
 
-      override def uriToPath(uri: URI): List[String] = {
-        val (root, fragment) = (
-          if (uri.isAbsolute) uri.toString.takeWhile(_ != '#')
-          else "",
-          "#" + Option(uri.getFragment).getOrElse(""))
-        (root :: fragment.split("/").toList).reverse
-      }
+  override def resolveUri(uri: URI): URI = uri
 
-      override def isInternal(reference: String): Boolean = false
+  override def listKnownUri: List[URI] =
+    resolvers.flatMap(_.listKnownUri).toList ::: upstreamResolver.map(_.listKnownUri).getOrElse(Nil)
 
-      override def resolveUri(uri: URI): URI = uri
-
-      override def listKnownUri: List[URI] =
-        resolvers.flatMap(_.listKnownUri).toList ::: upstreamResolver.map(_.listKnownUri).getOrElse(Nil)
-
-      override def toString: String = s"MultiSourceReferenceResolver of size [${schemaSources.size}]"
-    }
+  override def toString: String = s"MultiSourceReferenceResolver of size [${resolvers.size}]"
 }

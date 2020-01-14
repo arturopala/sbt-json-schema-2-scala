@@ -41,12 +41,21 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
         errors => Left(errors),
         typeDef => {
 
-          val schemaUrlToTypePath: Map[String, List[String]] = TypeDefinition.listSchemaUriToTypePath(typeDef).toMap
-          val schemaUrlToTypeInterfaces: Map[String, Seq[List[String]]] =
+          val schemaUriToTypePath: Map[String, List[String]] = TypeDefinition.listSchemaUriToTypePath(typeDef).toMap
+          val schemaUriToTypeInterfaces: Map[String, Seq[List[String]]] =
             TypeDefinition.listSchemaUriToTypeInterfaces(typeDef).groupBy(_._1).mapValues(_.flatMap(_._2))
 
+          println(s"Resolved ${schemaUriToTypePath.size} schema(s) to type definition(s):")
+          println(
+            schemaUriToTypePath
+              .mapValues(_.reverse.mkString("."))
+              .toSeq
+              .sortBy(_._1)
+              .map { case (k, v) => s"\t$k -> $v" }
+              .mkString("\n"))
+
           val typeResolver: TypeResolver =
-            new ScalaTypeResolver(schemaUrlToTypePath, schemaUrlToTypeInterfaces)(typeNameProvider)
+            new ScalaTypeResolver(schemaUriToTypePath, schemaUriToTypeInterfaces)(typeNameProvider)
 
           generateCodeFrom(typeDef, options, ScalaCodeGeneratorContext(schema, options), description)(
             typeResolver,

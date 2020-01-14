@@ -620,12 +620,71 @@ class ScalaCodeGeneratorSpec
                                  |    ]
                                  |  }
                                  |}""".stripMargin)
+
+    "generate from top level allOf schema with references" in
+      assertCanParseAndCompile("""{
+                                 |  "$id": "http://example.com/test.json",
+                                 |  "description": "A test schema",
+                                 |  "definitions": {
+                                 |    "item" : {
+                                 |        "type": "object",
+                                 |        "properties": {
+                                 |            "one": {
+                                 |                "type": "object",
+                                 |                "properties": {
+                                 |                    "third": {
+                                 |                        "type": "string"
+                                 |                    }
+                                 |                }
+                                 |            },
+                                 |            "fourth": {
+                                 |                "$ref": "#/definitions/fourth"
+                                 |            }
+                                 |        }
+                                 |    },
+                                 |    "fourth": {
+                                 |        "type": "object",
+                                 |        "properties": {
+                                 |            "fifth": {
+                                 |                "type": "integer"
+                                 |            }
+                                 |        }
+                                 |    }
+                                 |  },
+                                 |  "allOf": [
+                                 |    {
+                                 |        "$ref": "#/definitions/item"
+                                 |    },
+                                 |    {
+                                 |        "type": "object",
+                                 |        "$id": "/alpha",
+                                 |        "properties": {
+                                 |            "second": {
+                                 |                "$ref": "http://example.com/test.json#/definitions/item"
+                                 |            },
+                                 |            "eigth": {
+                                 |                "$ref": "#/definitions/sixth"
+                                 |            }
+                                 |        },
+                                 |        "definitions": {
+                                 |            "sixth": {
+                                 |                "type": "object",
+                                 |                "properties": {
+                                 |                    "seventh": {
+                                 |                        "type": "boolean"
+                                 |                    }
+                                 |                }
+                                 |            }
+                                 |        }
+                                 |    }
+                                 |  ]
+                                 |}""".stripMargin)
   }
 
   "Generate from known schemas" should {
 
     verifiedTestSchemas
-    //.filter(_.name == "ansible-stable-2.0.json")
+    //.filter(_.name == "project.json")
       .foreach { schema: SchemaSource =>
         s"generate from ${schema.name}" in assertCanParseAndCompile(schema, verifiedTestSchemas)
       }
