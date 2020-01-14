@@ -221,8 +221,8 @@ object TypeDefinitionsBuilder {
 
     val typeDefinitions = nonPrimitive
       .flatMap { schema =>
-        val childTypeName = typeNameProvider.toTypePatternName(schema)
-        processSchema(childTypeName, name :: path, schema)
+        val patternTypeName = typeNameProvider.toTypePatternName(schema)
+        processSchema(patternTypeName, path, schema)
       }
 
     typeDefinitions

@@ -45,7 +45,7 @@ class ScalaCodeGeneratorMoreSpec
 
   "Generate from known schemas - part 2" should {
     unverifiedTestSchemas
-    //.filter(_.name.startsWith("feed.json"))
+    //.filter(_.name.startsWith("azure-iot-edge-deployment-1.0.json"))
       .foreach { schema: SchemaSource =>
         s"generate from ${schema.name}" in assertCanParseAndCompile(schema, unverifiedTestSchemas)
       }
