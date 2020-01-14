@@ -272,7 +272,7 @@ object SchemaReader {
       .asOpt[JsArray]
       .map { array =>
         readOneOfAnyOfSchema(
-          p.copy(path = "oneOf" :: p.path, requiredFields = p.requiredFields ++ requiredFields),
+          p.copy(path = p.path, requiredFields = p.requiredFields ++ requiredFields),
           array,
           alternatives,
           isOneOf = true)
@@ -285,7 +285,7 @@ object SchemaReader {
       .asOpt[JsArray]
       .map { array =>
         readOneOfAnyOfSchema(
-          p.copy(path = "anyOf" :: p.path, requiredFields = p.requiredFields ++ requiredFields),
+          p.copy(path = p.path, requiredFields = p.requiredFields ++ requiredFields),
           array,
           alternatives,
           isOneOf = false)
@@ -317,7 +317,9 @@ object SchemaReader {
           .mkString("/")} to be an object or array, but got ${other.getClass.getSimpleName}.")
     }
 
-    val variants = array.value.zipWithIndex.flatMap { case (s, i) => readVariants(i.toString :: p.path)(s) }
+    val variants = array.value.zipWithIndex.flatMap {
+      case (s, i) => readVariants(i.toString :: (if (isOneOf) "oneOf" else "anyOf") :: p.path)(s)
+    }
 
     OneOfAnyOfSchema(p.a, variants, alternativeRequiredFields, isOneOf)
   }
@@ -338,7 +340,7 @@ object SchemaReader {
               case jsObject: JsObject =>
                 val schema = readSchema(
                   p.name,
-                  "0" :: p.path,
+                  "0" :: "allOf" :: p.path,
                   jsObject,
                   requiredFields = p.requiredFields,
                   currentReferenceResolver = p.referenceResolver,
@@ -356,7 +358,7 @@ object SchemaReader {
               case (jsObject: JsObject, i) =>
                 readSchema(
                   p.name,
-                  i.toString :: p.path,
+                  i.toString :: "allOf" :: p.path,
                   jsObject,
                   requiredFields = p.requiredFields,
                   currentReferenceResolver = p.referenceResolver,
@@ -411,7 +413,7 @@ object SchemaReader {
 
               readSchema(
                 p.name,
-                "allOf" :: p.path,
+                p.path,
                 mergedJson,
                 p.description,
                 p.requiredFields,

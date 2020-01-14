@@ -43,7 +43,10 @@ sealed trait Schema {
   val boolean: Boolean = false
   def required: Boolean = attributes.required
 
-  val uri: String = SchemaReferenceResolver.pathToReference(path)
+  val uri: String = {
+    val normalizedPath = if (path.nonEmpty && (path.head == "not")) path.tail else path
+    SchemaReferenceResolver.pathToReference(normalizedPath)
+  }
 
   def withDefinitions(definitions: Seq[Schema]): Schema =
     SchemaUtils.copyAttributes(this, attributes.copy(definitions = definitions))

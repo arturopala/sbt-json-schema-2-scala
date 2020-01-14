@@ -66,6 +66,7 @@ trait TestSchemas {
     "appveyor.json",
     "angular.schema.json",
     "asmdef.json",
+    "avro-avsc.json",
     "babelrc.json",
     "backportrc.json",
     "band-manifest.json",
@@ -206,6 +207,7 @@ trait TestSchemas {
     "typings.json",
     "typingsrc.json",
     "up.json",
+    "vega-lite.json",
     "vs-2017.3.host.json",
     "vsconfig.json",
     "vsext.json",
@@ -229,7 +231,6 @@ trait TestSchemas {
     //"ansible-stable-2.5.json",
     //"ansible-stable-2.6.json",
     //"ansible-stable-2.7.json",
-    "avro-avsc.json",
     "azure-iot-edge-deployment-1.0.json",
     "azure-iot-edge-deployment-2.0.json",
     "azure-iot-edge-deployment-template-1.0.json",
@@ -285,7 +286,6 @@ trait TestSchemas {
     "tslint.json",
     "ui5-manifest.json",
     "vega.json",
-    "vega-lite.json",
     "vs-nesting.json",
     "web-types.json"
   )
