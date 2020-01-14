@@ -266,224 +266,28 @@ object SchemaReader {
     }
   }
 
-  def attemptReadOneOf(p: Parameters): Option[Schema] = {
-    val (requiredFields, alternatives) = readRequired(p.json)
-    (p.json \ "oneOf")
-      .asOpt[JsArray]
-      .map { array =>
-        readOneOfAnyOfSchema(
-          p.copy(path = p.path, requiredFields = p.requiredFields ++ requiredFields),
-          array,
-          alternatives,
-          isOneOf = true)
+  final val implicitReaders: Seq[(Set[String], Parameters => Schema)] = Seq(
+    Vocabulary.objectCoreVocabulary       -> readObjectSchema,
+    Vocabulary.objectValidationVocabulary -> readObjectSchema,
+    Vocabulary.stringValidationVocabulary -> readStringSchema,
+    Vocabulary.numberValidationVocabulary -> readNumberSchema,
+    Vocabulary.arrayCoreVocabulary        -> readArraySchema,
+    Vocabulary.arrayValidationVocabulary  -> readArraySchema
+  )
+
+  def attemptReadImplicitType(p: Parameters): Option[Schema] = {
+    import Vocabulary._
+
+    val fields: Seq[String] = p.json.fields.map(_._1)
+
+    implicitReaders
+      .foldLeft[Option[Schema]](None) {
+        case (a, (v, r)) => a.orElse(if (isKeywordIn(v)(fields)) Some(r(p)) else None)
+      }
+      .orElse {
+        attemptReadEnumOrConst(p)
       }
   }
-
-  def attemptReadAnyOf(p: Parameters): Option[Schema] = {
-    val (requiredFields, alternatives) = readRequired(p.json)
-    (p.json \ "anyOf")
-      .asOpt[JsArray]
-      .map { array =>
-        readOneOfAnyOfSchema(
-          p.copy(path = p.path, requiredFields = p.requiredFields ++ requiredFields),
-          array,
-          alternatives,
-          isOneOf = false)
-      }
-  }
-
-  def readOneOfAnyOfSchema(
-    p: Parameters,
-    array: JsArray,
-    alternativeRequiredFields: Seq[Set[String]],
-    isOneOf: Boolean): OneOfAnyOfSchema = {
-
-    def readVariants(path: List[String]): JsValue => Seq[Schema] = {
-      case jsObject: JsObject =>
-        Seq(
-          readSchema(
-            p.name,
-            path,
-            jsObject,
-            requiredFields = p.requiredFields,
-            currentReferenceResolver = p.referenceResolver,
-            processDefinitions = p.processDefinitions))
-
-      case jsArray: JsArray =>
-        jsArray.value.zipWithIndex.flatMap { case (s, i) => readVariants(i.toString :: p.path)(s) }
-
-      case other =>
-        throw new IllegalStateException(s"Invalid ${if (isOneOf) "oneOf" else "anyOf"} schema, expected ${p.path.reverse
-          .mkString("/")} to be an object or array, but got ${other.getClass.getSimpleName}.")
-    }
-
-    val variants = array.value.zipWithIndex.flatMap {
-      case (s, i) => readVariants(i.toString :: (if (isOneOf) "oneOf" else "anyOf") :: p.path)(s)
-    }
-
-    OneOfAnyOfSchema(p.a, variants, alternativeRequiredFields, isOneOf)
-  }
-
-  val keywordsToRemoveWhenMergingSchema: Set[String] =
-    Set(Keywords.definitions, Keywords.`$defs`, Keywords.`$id`)
-
-  def attemptReadAllOf(p: Parameters): Option[Schema] =
-    (p.json \ "allOf")
-      .asOpt[JsArray]
-      .map { array =>
-        array.value.length match {
-          case 0 =>
-            throw new IllegalStateException("Invalid schema, allOf array must not be empty.")
-
-          case 1 =>
-            array.value.head match {
-              case jsObject: JsObject =>
-                val schema = readSchema(
-                  p.name,
-                  "0" :: "allOf" :: p.path,
-                  jsObject,
-                  requiredFields = p.requiredFields,
-                  currentReferenceResolver = p.referenceResolver,
-                  processDefinitions = p.processDefinitions
-                )
-                AllOfSchema(p.a, Seq.empty, p.requiredFields, schema)
-
-              case other =>
-                throw new IllegalStateException(s"Invalid allOf schema, expected ${p.path.reverse
-                  .mkString("/")}/0 to be an object, but got ${other.getClass.getSimpleName}.")
-            }
-
-          case many =>
-            val variants: Seq[Schema] = array.value.zipWithIndex.map {
-              case (jsObject: JsObject, i) =>
-                readSchema(
-                  p.name,
-                  i.toString :: "allOf" :: p.path,
-                  jsObject,
-                  requiredFields = p.requiredFields,
-                  currentReferenceResolver = p.referenceResolver,
-                  processDefinitions = p.processDefinitions
-                )
-
-              case (other, i) =>
-                throw new IllegalStateException(s"Invalid allOf schema, expected ${p.path.reverse
-                  .mkString("/")}/$i to be an object, but got ${other.getClass.getSimpleName}.")
-            }
-
-            val compositeReferenceResolver: SchemaReferenceResolver = {
-
-              val resolvers: Seq[SchemaReferenceResolver] = array.value.flatMap {
-                case jsObject: JsObject => SchemaUtils.collectSchemaReferenceResolvers(jsObject, p.referenceResolver)
-                case _                  => Seq.empty
-              }.distinct
-
-              if (resolvers.size > 1)
-                new MultiReferenceResolver(resolvers, internal = true, upstreamResolver = None)
-              else
-                resolvers.head
-            }
-
-            val aggregatedSchema: Schema = {
-
-              val mergedJson = array.value.zipWithIndex.foldLeft(Json.obj()) {
-                case (a, (v, i)) =>
-                  v match {
-                    case json: JsObject => {
-                      SchemaUtils
-                        .dereferenceSchema(
-                          json,
-                          i.toString :: "allOf" :: p.path,
-                          p.referenceResolver,
-                          keywordsToRemoveWhenMergingSchema) match {
-
-                        case jsObject: JsObject =>
-                          a.deepMerge(jsObject)
-
-                        case other =>
-                          throw new IllegalStateException(
-                            s"Unexpected schema type after dereference: ${other.getClass.getSimpleName}")
-                      }
-
-                    }
-                    case other =>
-                      throw new IllegalStateException(
-                        s"Invalid schema, allOf array element must be valid schema object, but got $other")
-                  }
-              }
-
-              readSchema(
-                p.name,
-                p.path,
-                mergedJson,
-                p.description,
-                p.requiredFields,
-                compositeReferenceResolver,
-                processDefinitions = false)
-            }
-
-            AllOfSchema(p.a, variants, p.requiredFields, aggregatedSchema)
-        }
-      }
-
-  def attemptReadNot(p: Parameters): Option[Schema] =
-    (p.json \ "not")
-      .asOpt[JsObject]
-      .map { json =>
-        val schema: Schema =
-          readSchema(
-            p.name,
-            "not" :: p.path,
-            json,
-            p.description,
-            p.requiredFields,
-            p.referenceResolver,
-            p.processDefinitions)
-        NotSchema(p.a, schema)
-      }
-
-  def attemptReadIfThenElse(p: Parameters): Option[Schema] =
-    (p.json \ "if")
-      .asOpt[JsObject]
-      .flatMap { ifJson =>
-        (p.json \ "then")
-          .asOpt[JsObject]
-          .map { thenJson =>
-            val condition: Schema =
-              readSchema(
-                p.name,
-                "if" :: p.path,
-                ifJson,
-                p.description,
-                p.requiredFields,
-                p.referenceResolver,
-                p.processDefinitions)
-
-            val schema: Schema =
-              readSchema(
-                p.name,
-                "then" :: p.path,
-                thenJson,
-                p.description,
-                p.requiredFields,
-                p.referenceResolver,
-                p.processDefinitions)
-
-            val elseSchema: Option[Schema] = (p.json \ "else")
-              .asOpt[JsObject]
-              .map { elseJson =>
-                readSchema(
-                  p.name,
-                  "else" :: p.path,
-                  elseJson,
-                  p.description,
-                  p.requiredFields,
-                  p.referenceResolver,
-                  p.processDefinitions)
-              }
-
-            IfThenElseSchema(p.a, condition, schema, elseSchema)
-          }
-      }
 
   def readObjectSchema(p: Parameters): Schema = {
 
@@ -773,29 +577,6 @@ object SchemaReader {
     BooleanSchema(p.a, enum)
   }
 
-  final val implicitReaders: Seq[(Set[String], Parameters => Schema)] = Seq(
-    Vocabulary.objectCoreVocabulary       -> readObjectSchema,
-    Vocabulary.objectValidationVocabulary -> readObjectSchema,
-    Vocabulary.stringValidationVocabulary -> readStringSchema,
-    Vocabulary.numberValidationVocabulary -> readNumberSchema,
-    Vocabulary.arrayCoreVocabulary        -> readArraySchema,
-    Vocabulary.arrayValidationVocabulary  -> readArraySchema
-  )
-
-  def attemptReadImplicitType(p: Parameters): Option[Schema] = {
-    import Vocabulary._
-
-    val fields: Seq[String] = p.json.fields.map(_._1)
-
-    implicitReaders
-      .foldLeft[Option[Schema]](None) {
-        case (a, (v, r)) => a.orElse(if (isKeywordIn(v)(fields)) Some(r(p)) else None)
-      }
-      .orElse {
-        attemptReadEnumOrConst(p)
-      }
-  }
-
   def attemptReadEnumOrConst(p: Parameters): Option[Schema] =
     (p.json \ "enum")
       .asOpt[Seq[JsValue]]
@@ -831,6 +612,225 @@ object SchemaReader {
             }
             OneOfAnyOfSchema(p.a, variants, Seq.empty, isOneOf = true)
         }
+      }
+
+  def attemptReadOneOf(p: Parameters): Option[Schema] = {
+    val (requiredFields, alternatives) = readRequired(p.json)
+    (p.json \ "oneOf")
+      .asOpt[JsArray]
+      .map { array =>
+        readOneOfAnyOfSchema(
+          p.copy(path = p.path, requiredFields = p.requiredFields ++ requiredFields),
+          array,
+          alternatives,
+          isOneOf = true)
+      }
+  }
+
+  def attemptReadAnyOf(p: Parameters): Option[Schema] = {
+    val (requiredFields, alternatives) = readRequired(p.json)
+    (p.json \ "anyOf")
+      .asOpt[JsArray]
+      .map { array =>
+        readOneOfAnyOfSchema(
+          p.copy(path = p.path, requiredFields = p.requiredFields ++ requiredFields),
+          array,
+          alternatives,
+          isOneOf = false)
+      }
+  }
+
+  def readOneOfAnyOfSchema(
+    p: Parameters,
+    array: JsArray,
+    alternativeRequiredFields: Seq[Set[String]],
+    isOneOf: Boolean): OneOfAnyOfSchema = {
+
+    def readVariants(path: List[String]): JsValue => Seq[Schema] = {
+      case jsObject: JsObject =>
+        Seq(
+          readSchema(
+            p.name,
+            path,
+            jsObject,
+            requiredFields = p.requiredFields,
+            currentReferenceResolver = p.referenceResolver,
+            processDefinitions = p.processDefinitions))
+
+      case jsArray: JsArray =>
+        jsArray.value.zipWithIndex.flatMap { case (s, i) => readVariants(i.toString :: p.path)(s) }
+
+      case other =>
+        throw new IllegalStateException(s"Invalid ${if (isOneOf) "oneOf" else "anyOf"} schema, expected ${p.path.reverse
+          .mkString("/")} to be an object or array, but got ${other.getClass.getSimpleName}.")
+    }
+
+    val variants = array.value.zipWithIndex.flatMap {
+      case (s, i) => readVariants(i.toString :: (if (isOneOf) "oneOf" else "anyOf") :: p.path)(s)
+    }
+
+    OneOfAnyOfSchema(p.a, variants, alternativeRequiredFields, isOneOf)
+  }
+
+  val keywordsToRemoveWhenMergingSchema: Set[String] =
+    Set(Keywords.definitions, Keywords.`$defs`, Keywords.`$id`)
+
+  def attemptReadAllOf(p: Parameters): Option[Schema] =
+    (p.json \ "allOf")
+      .asOpt[JsArray]
+      .map { array =>
+        array.value.length match {
+          case 0 =>
+            throw new IllegalStateException("Invalid schema, allOf array must not be empty.")
+
+          case 1 =>
+            array.value.head match {
+              case jsObject: JsObject =>
+                val schema = readSchema(
+                  p.name,
+                  "0" :: "allOf" :: p.path,
+                  jsObject,
+                  requiredFields = p.requiredFields,
+                  currentReferenceResolver = p.referenceResolver,
+                  processDefinitions = p.processDefinitions
+                )
+                AllOfSchema(p.a, Seq.empty, p.requiredFields, schema)
+
+              case other =>
+                throw new IllegalStateException(s"Invalid allOf schema, expected ${p.path.reverse
+                  .mkString("/")}/0 to be an object, but got ${other.getClass.getSimpleName}.")
+            }
+
+          case many =>
+            val variants: Seq[Schema] = array.value.zipWithIndex.map {
+              case (jsObject: JsObject, i) =>
+                readSchema(
+                  p.name,
+                  i.toString :: "allOf" :: p.path,
+                  jsObject,
+                  requiredFields = p.requiredFields,
+                  currentReferenceResolver = p.referenceResolver,
+                  processDefinitions = p.processDefinitions
+                )
+
+              case (other, i) =>
+                throw new IllegalStateException(s"Invalid allOf schema, expected ${p.path.reverse
+                  .mkString("/")}/$i to be an object, but got ${other.getClass.getSimpleName}.")
+            }
+
+            val compositeReferenceResolver: SchemaReferenceResolver = {
+
+              val resolvers: Seq[SchemaReferenceResolver] = array.value.flatMap {
+                case jsObject: JsObject => SchemaUtils.collectSchemaReferenceResolvers(jsObject, p.referenceResolver)
+                case _                  => Seq.empty
+              }.distinct
+
+              if (resolvers.size > 1)
+                new MultiReferenceResolver(resolvers, internal = true, upstreamResolver = None)
+              else
+                resolvers.head
+            }
+
+            val aggregatedSchema: Schema = {
+
+              val mergedJson = array.value.zipWithIndex.foldLeft(Json.obj()) {
+                case (a, (v, i)) =>
+                  v match {
+                    case json: JsObject => {
+                      SchemaUtils
+                        .dereferenceSchema(
+                          json,
+                          i.toString :: "allOf" :: p.path,
+                          p.referenceResolver,
+                          keywordsToRemoveWhenMergingSchema) match {
+
+                        case jsObject: JsObject =>
+                          a.deepMerge(jsObject)
+
+                        case other =>
+                          throw new IllegalStateException(
+                            s"Unexpected schema type after dereference: ${other.getClass.getSimpleName}")
+                      }
+
+                    }
+                    case other =>
+                      throw new IllegalStateException(
+                        s"Invalid schema, allOf array element must be valid schema object, but got $other")
+                  }
+              }
+
+              readSchema(
+                p.name,
+                p.path,
+                mergedJson,
+                p.description,
+                p.requiredFields,
+                compositeReferenceResolver,
+                processDefinitions = false)
+            }
+
+            AllOfSchema(p.a, variants, p.requiredFields, aggregatedSchema)
+        }
+      }
+
+  def attemptReadNot(p: Parameters): Option[Schema] =
+    (p.json \ "not")
+      .asOpt[JsObject]
+      .map { json =>
+        val schema: Schema =
+          readSchema(
+            p.name,
+            "not" :: p.path,
+            json,
+            p.description,
+            p.requiredFields,
+            p.referenceResolver,
+            p.processDefinitions)
+        NotSchema(p.a, schema)
+      }
+
+  def attemptReadIfThenElse(p: Parameters): Option[Schema] =
+    (p.json \ "if")
+      .asOpt[JsObject]
+      .flatMap { ifJson =>
+        (p.json \ "then")
+          .asOpt[JsObject]
+          .map { thenJson =>
+            val condition: Schema =
+              readSchema(
+                p.name,
+                "if" :: p.path,
+                ifJson,
+                p.description,
+                p.requiredFields,
+                p.referenceResolver,
+                p.processDefinitions)
+
+            val schema: Schema =
+              readSchema(
+                p.name,
+                "then" :: p.path,
+                thenJson,
+                p.description,
+                p.requiredFields,
+                p.referenceResolver,
+                p.processDefinitions)
+
+            val elseSchema: Option[Schema] = (p.json \ "else")
+              .asOpt[JsObject]
+              .map { elseJson =>
+                readSchema(
+                  p.name,
+                  "else" :: p.path,
+                  elseJson,
+                  p.description,
+                  p.requiredFields,
+                  p.referenceResolver,
+                  p.processDefinitions)
+              }
+
+            IfThenElseSchema(p.a, condition, schema, elseSchema)
+          }
       }
 
   def decideResolverAndPath(
