@@ -131,12 +131,12 @@ object SchemaReader {
 
       attemptReadExplicitType(p)
         .orElse { attemptReadReference(p) }
+        .orElse { attemptReadImplicitType(p) }
         .orElse { attemptReadOneOf(p) }
         .orElse { attemptReadAnyOf(p) }
         .orElse { attemptReadAllOf(p) }
         .orElse { attemptReadNot(p) }
         .orElse { attemptReadIfThenElse(p) }
-        .orElse { attemptReadImplicitType(p) }
         .getOrElse {
           val ks = keywordsInVocabularyNotMeta(json.fields)
           if (ks.nonEmpty) {
@@ -710,21 +710,20 @@ object SchemaReader {
       )
       .getOrElse(Seq.empty)
 
-  def readRequired(json: JsObject): (Seq[String], Seq[Set[String]]) =
-    (json \ "required")
-      .asOpt[Seq[String]]
-      .map(s => (s, Seq.empty))
-      .orElse(
-        (json \ "oneOf")
-          .asOpt[Seq[JsObject]]
-          .map(s => {
-            val names = s.map(o => (o \ "required").asOpt[Set[String]].getOrElse(Set.empty))
-            val required = names.reduce(_ intersect _)
-            val variants = names.map(_ -- required)
-            (required.toSeq, variants)
-          })
-      )
+  def readRequired(json: JsObject): (Seq[String], Seq[Set[String]]) = {
+    val required: Seq[String] = (json \ "required").asOpt[Seq[String]].getOrElse(Seq.empty)
+    val (required2, alternatives) = (json \ "oneOf")
+      .asOpt[Seq[JsObject]]
+      .map(s => {
+        val names = s.map(o => (o \ "required").asOpt[Set[String]].getOrElse(Set.empty))
+        val required = names.reduce(_ intersect _)
+        val variants = names.map(_ -- required)
+        (required.toSeq, variants)
+      })
       .getOrElse((Seq.empty, Seq.empty))
+
+    (required ++ required2, alternatives)
+  }
 
   def readStringSchema(p: Parameters): StringSchema = {
 

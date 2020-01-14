@@ -45,7 +45,7 @@ class ScalaCodeGeneratorMoreSpec
 
   "Generate from known schemas - part 2" should {
     unverifiedTestSchemas
-    //.filter(_.name.startsWith("avro-avsc.json"))
+    //.filter(_.name.startsWith("feed.json"))
       .foreach { schema: SchemaSource =>
         s"generate from ${schema.name}" in assertCanParseAndCompile(schema, unverifiedTestSchemas)
       }
