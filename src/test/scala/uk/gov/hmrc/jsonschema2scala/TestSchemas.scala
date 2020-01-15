@@ -16,7 +16,7 @@
 
 package uk.gov.hmrc.jsonschema2scala
 
-import uk.gov.hmrc.jsonschema2scala.schema.{SchemaResource, SchemaSource}
+import uk.gov.hmrc.jsonschema2scala.schema.SchemaSource
 
 import scala.util.Try
 
@@ -32,10 +32,10 @@ trait TestSchemas {
 
   import uk.gov.hmrc.jsonschema2scala.utils.TryOps._
 
-  def readSchemaSource: String => SchemaResource = { filename =>
+  def readSchemaSource: String => SchemaSource = { filename =>
     Try(classOf[SchemaReaderSpec].getResourceAsStream(f"/schemas/$filename"))
       .flatMap { is =>
-        Try(SchemaResource(is, filename))
+        Try(SchemaSource(filename, is))
       }
       .logError(e => {
         sys.error(s"Creating test schema source $filename failed with $e")

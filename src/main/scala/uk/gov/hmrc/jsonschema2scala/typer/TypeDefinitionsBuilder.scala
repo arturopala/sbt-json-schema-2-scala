@@ -251,18 +251,6 @@ object TypeDefinitionsBuilder {
       case _ => Set()
     }.toSet
 
-  def declaresType(schema: Schema): Boolean = schema match {
-    case _: ObjectSchema          => true
-    case arraySchema: ArraySchema => !arraySchema.allItemsPrimitive
-    case mapSchema: MapSchema =>
-      mapSchema.definitions.exists(declaresType) || mapSchema.patternProperties.exists(declaresType)
-    case oneOfAnyOfSchema: OneOfAnyOfSchema => oneOfAnyOfSchema.variants.exists(declaresType)
-    case allOfSchema: AllOfSchema           => declaresType(allOfSchema.aggregatedSchema)
-    case notSchema: NotSchema               => declaresType(notSchema.schema)
-    case reference: ExternalSchemaReference => declaresType(reference.schema)
-    case _                                  => false
-  }
-
   def sortByName(definitions: Seq[TypeDefinition]): Seq[TypeDefinition] =
     definitions.sortBy(_.name)
 
@@ -289,8 +277,7 @@ object TypeDefinitionsBuilder {
     }
   }
 
-  def avoidNameCollisions(types: Seq[TypeDefinition], parentName: String)(
-    implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] =
+  def avoidNameCollisions(types: Seq[TypeDefinition], parentName: String): Seq[TypeDefinition] =
     if (types.size <= 1) types
     else {
       val similar: Map[String, Int] = (types

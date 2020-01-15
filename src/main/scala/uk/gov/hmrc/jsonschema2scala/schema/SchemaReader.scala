@@ -25,30 +25,41 @@ import scala.util.Try
 object SchemaReader {
 
   def read(name: String, json: JsObject): Schema = {
-    val uri = attemptReadId(json).getOrElse(URI.create(name))
-    read(uri, name, json, None)
+    val schemaSource = SchemaSourceJson(name, json)
+    read(schemaSource, None)
   }
 
   def read(name: String, json: JsObject, otherSchemas: Seq[SchemaSource]): Schema = {
-    val uri = attemptReadId(json).getOrElse(URI.create(name))
-    read(uri, name, json, Some(SchemaReferenceResolver(otherSchemas)))
+    val schemaSource = SchemaSourceJson(name, json)
+    read(schemaSource, Some(SchemaReferenceResolver(otherSchemas)))
   }
 
-  def read(uri: URI, name: String, json: JsObject, otherSchemas: Seq[SchemaSource]): Schema =
-    read(uri, name, json, Some(SchemaReferenceResolver(otherSchemas)))
+  def read(schemaSource: SchemaSource, otherSchemas: Seq[SchemaSource]): Schema =
+    read(schemaSource, Some(SchemaReferenceResolver(otherSchemas)))
 
   def readMany(sources: Seq[SchemaSource]): Seq[Schema] =
-    sources.map(source =>
-      source.json.fold(throw _, read(source.uri, source.name, _, Some(SchemaReferenceResolver(sources)))))
+    sources.map(read(_, Some(SchemaReferenceResolver(sources))))
 
-  def read(uri: URI, name: String, json: JsObject, externalResolver: Option[SchemaReferenceResolver] = None): Schema = {
-    val resolver = SchemaReferenceResolver(uri, name, json, externalResolver)
-    val path = SchemaReferenceResolver.rootPath(uri)
-    resolver.lookupSchema(uri, (_, j, r) => readSchema(name, path, j, None, Seq.empty, r, true)) match {
+  def read(schemaSource: SchemaSource, externalResolver: Option[SchemaReferenceResolver] = None): Schema = {
+    val resolver = SchemaReferenceResolver(schemaSource, externalResolver)
+    val path = SchemaReferenceResolver.rootPath(schemaSource.uri)
+    resolver.lookupSchema(
+      schemaSource.uri,
+      (_, jsValue, resolver) =>
+        readSchema(
+          name = schemaSource.name,
+          currentPath = path,
+          value = jsValue,
+          externalDescription = None,
+          requiredFields = Seq.empty,
+          currentReferenceResolver = resolver,
+          processDefinitions = true
+      )
+    ) match {
       case None =>
-        throw new IllegalStateException(s"Unexpected error, schema lookup failed for $uri")
+        throw new IllegalStateException(s"Unexpected error, schema lookup failed for ${schemaSource.uri}")
 
-      case Some(schema) => schema
+      case Some((_, schema)) => schema
     }
   }
 
@@ -101,7 +112,7 @@ object SchemaReader {
       val id: Option[URI] = attemptReadId(json)
 
       val (referenceResolver, path) =
-        decideResolverAndPath(name, currentPath, json, currentReferenceResolver, id)
+        resolverAndPath(name, currentPath, json, currentReferenceResolver, id)
 
       val description: Option[String] = externalDescription.orElse(attemptReadDescription(json))
 
@@ -251,7 +262,7 @@ object SchemaReader {
         uri,
         readSchema(_, path2, _, externalDescription = p.description, p.requiredFields, _, processDefinitions = true)) match {
 
-      case Some(referencedSchema) =>
+      case Some((schemaSource, referencedSchema)) =>
         if (p.referenceResolver.isInternal(referencedSchema.uri)) {
           if (referencedSchema.primitive)
             SchemaUtils.copy(referencedSchema, p.name, "$ref" :: p.path, p.description)
@@ -509,6 +520,7 @@ object SchemaReader {
               val path2 = referenceResolver.uriToPath(uri)
               referenceResolver
                 .lookupSchema(uri, readSchema(_, path2, _, description, Seq.empty, _, processDefinitions = true))
+                .map(_._2)
             })
             .collect { case Some(x) => x }
       )
@@ -833,7 +845,7 @@ object SchemaReader {
           }
       }
 
-  def decideResolverAndPath(
+  def resolverAndPath(
     name: String,
     path: List[String],
     json: JsObject,

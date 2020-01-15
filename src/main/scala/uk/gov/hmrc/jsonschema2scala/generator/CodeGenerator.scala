@@ -23,5 +23,5 @@ trait CodeGenerator {
   type CodeGeneratorOptions
   type CodeGeneratorResult = Either[List[String], (String, String, Seq[Code])]
 
-  def generateCodeFrom(schema: Schema, options: CodeGeneratorOptions, description: String): CodeGeneratorResult
+  def generateCodeFromSchema(schema: Schema, options: CodeGeneratorOptions, description: String): CodeGeneratorResult
 }

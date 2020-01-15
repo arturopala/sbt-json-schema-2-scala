@@ -40,10 +40,9 @@ class SchemaReaderSpec extends WordSpec with Matchers with TestSchemas {
   "SchemaReader" should {
     allSchemas
     //.filter(_.name == "tslint.json")
-      .foreach { schema =>
-        s"read ${schema.name} schema" in {
-          val json = schema.json.fold(throw _, identity)
-          val definition = SchemaReader.read(schema.name, json, allSchemas)
+      .foreach { schemaSource =>
+        s"read ${schemaSource.name} schema" in {
+          val definition = SchemaReader.read(schemaSource, allSchemas)
           definition.primitive shouldBe false
         }
       }

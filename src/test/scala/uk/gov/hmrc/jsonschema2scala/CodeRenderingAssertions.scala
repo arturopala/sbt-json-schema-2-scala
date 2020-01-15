@@ -16,8 +16,6 @@
 
 package uk.gov.hmrc.jsonschema2scala
 
-import java.net.URI
-
 import org.scalatest.{Assertions, Matchers}
 import play.api.libs.json.{JsObject, Json}
 import uk.gov.hmrc.jsonschema2scala.generator.scala2.{ScalaCodeGenerator, ScalaCodeGeneratorOptions}
@@ -38,8 +36,7 @@ trait CodeRenderingAssertions extends CompilationAssertions {
 
   def assertCanParseAndCompile(schemaSource: SchemaSource, otherSchemas: Seq[SchemaSource])(
     implicit compiler: Compiler): Unit = {
-    val definition =
-      schemaSource.json.fold(throw _, SchemaReader.read(schemaSource.uri, schemaSource.name, _, otherSchemas))
+    val definition = SchemaReader.read(schemaSource, otherSchemas)
     assertCanParseAndCompile(definition, packageName = "a.b.c")
   }
 
@@ -53,13 +50,13 @@ trait CodeRenderingAssertions extends CompilationAssertions {
     implicit compiler: Compiler): Unit = {
     val options = ScalaCodeGeneratorOptions(features = Set(), packageName = packageName)
     val definition = SchemaReader.read(className, schemaJson)
-    val result = ScalaCodeGenerator.generateCodeFrom(definition, options, "")
+    val result = ScalaCodeGenerator.generateCodeFromSchema(definition, options, "")
     assertSuccessAndCompiles(result)
   }
 
   def assertCanParseAndCompile(schema: Schema, packageName: String)(implicit compiler: Compiler): Unit = {
     val options = ScalaCodeGeneratorOptions(features = Set(), packageName = packageName)
-    val result = ScalaCodeGenerator.generateCodeFrom(schema, options, "")
+    val result = ScalaCodeGenerator.generateCodeFromSchema(schema, options, "")
     assertSuccessAndCompiles(result)
   }
 
@@ -69,7 +66,7 @@ trait CodeRenderingAssertions extends CompilationAssertions {
     val name = randomName
     val definition = SchemaReader.read(name, schemaJson)
     ScalaCodeGenerator
-      .generateCodeFrom(definition, options, description = "") should be leftSide
+      .generateCodeFromSchema(definition, options, description = "") should be leftSide
   }
 
 }

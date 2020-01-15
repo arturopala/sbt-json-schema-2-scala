@@ -27,23 +27,21 @@ import scala.util.{Failure, Try}
 sealed trait SchemaSource {
 
   def name: String
-  def content: String
+  def uri: URI
+  def json: JsObject
+}
 
-  import uk.gov.hmrc.jsonschema2scala.utils.TryOps._
+object SchemaSource {
 
-  lazy val json: Either[Throwable, JsObject] = {
-    Try(Json.parse(content).as[JsObject]).toEither
+  def apply(name: String, inputStream: InputStream): SchemaSource = {
+    val content: String = {
+      val source: Source = Source.fromInputStream(inputStream, "utf-8")
+      readSource(source)
+    }
+    SchemaSourceUnparsed(name, content)
   }
 
-  lazy val uri: URI = json.fold(
-    throw _,
-    SchemaReader
-      .attemptReadId(_)
-      .getOrElse(defaultURI))
-
-  def defaultURI: URI
-
-  protected def readSource(source: Source): String =
+  def readSource(source: Source): String =
     Try(removeBOM(source.mkString)).recoverWith {
       case e =>
         Try(source.close())
@@ -52,9 +50,17 @@ sealed trait SchemaSource {
 
   private def removeBOM(s: String): String =
     if (s.startsWith("\uFEFF")) s.substring(1) else s
+
 }
 
-case class SchemaFile(file: File) extends SchemaSource {
+case class SchemaSourceJsonWithUri(name: String, uri: URI, json: JsObject) extends SchemaSource
+
+case class SchemaSourceJson(name: String, json: JsObject) extends SchemaSource with SchemaUriReader
+
+case class SchemaSourceUnparsed(name: String, content: String)
+    extends SchemaSource with SchemaUriReader with SchemaContentParser
+
+case class SchemaSourceFile(file: File) extends SchemaSource with SchemaUriReader with SchemaContentParser {
 
   override val name: String = {
     file.getName
@@ -68,19 +74,27 @@ case class SchemaFile(file: File) extends SchemaSource {
 
   override val content: String = {
     val source: Source = Source.fromFile(file, "utf-8")
-    readSource(source)
+    SchemaSource.readSource(source)
   }
-
-  override def defaultURI: URI = URI.create(name)
 }
 
-case class SchemaResource(inputStream: InputStream, name: String) extends SchemaSource {
+trait SchemaContentParser {
 
-  override val content: String = {
-    val source: Source = Source.fromInputStream(inputStream, "utf-8")
-    readSource(source)
+  def content: String
+
+  private lazy val parseResult: Either[Throwable, JsObject] = {
+    Try(Json.parse(content).as[JsObject]).toEither
   }
 
-  override def defaultURI: URI = URI.create(name)
+  lazy val json: JsObject = parseResult.fold(throw _, identity)
+
+}
+
+trait SchemaUriReader {
+
+  def name: String
+  def json: JsObject
+
+  lazy val uri: URI = SchemaReader.attemptReadId(json).getOrElse(URI.create(name))
 
 }

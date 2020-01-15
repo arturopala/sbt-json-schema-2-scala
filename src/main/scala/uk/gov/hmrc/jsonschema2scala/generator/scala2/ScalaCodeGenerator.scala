@@ -17,7 +17,7 @@
 package uk.gov.hmrc.jsonschema2scala.generator.scala2
 
 import uk.gov.hmrc.jsonschema2scala.generator.scala2.ScalaCode._
-import uk.gov.hmrc.jsonschema2scala.generator.{CodeGenerator, ScalaTypeResolver, TypeResolver}
+import uk.gov.hmrc.jsonschema2scala.generator.{CodeGenerator, TypeResolver}
 import uk.gov.hmrc.jsonschema2scala.schema.NameUtils.{firstCharUppercase, normalize, pathLastPart, variableName}
 import uk.gov.hmrc.jsonschema2scala.schema._
 import uk.gov.hmrc.jsonschema2scala.typer.{ScalaTypeNameProvider, TypeDefinition, TypeDefinitionsBuilder, TypeNameProvider}
@@ -28,7 +28,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
 
   override type CodeGeneratorOptions = ScalaCodeGeneratorOptions
 
-  override def generateCodeFrom(
+  override def generateCodeFromSchema(
     schema: Schema,
     options: ScalaCodeGeneratorOptions,
     description: String): CodeGeneratorResult = {
@@ -57,14 +57,14 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
           val typeResolver: TypeResolver =
             new ScalaTypeResolver(schemaUriToTypePath, schemaUriToTypeInterfaces)(typeNameProvider)
 
-          generateCodeFrom(typeDef, options, ScalaCodeGeneratorContext(schema, options), description)(
+          generateCodeFromTypeDefinition(typeDef, options, ScalaCodeGeneratorContext(schema, options), description)(
             typeResolver,
             typeNameProvider)
         }
       )
   }
 
-  def generateCodeFrom(
+  def generateCodeFromTypeDefinition(
     typeDef: TypeDefinition,
     options: ScalaCodeGeneratorOptions,
     context: ScalaCodeGeneratorContext,

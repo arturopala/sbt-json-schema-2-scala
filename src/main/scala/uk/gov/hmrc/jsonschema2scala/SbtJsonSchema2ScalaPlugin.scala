@@ -22,7 +22,7 @@ import sbt.Keys._
 import sbt._
 import uk.gov.hmrc.jsonschema2scala.generator.Code
 import uk.gov.hmrc.jsonschema2scala.generator.scala2.{JsonSchema2ScalaFeature, ScalaCodeGenerator, ScalaCodeGeneratorOptions}
-import uk.gov.hmrc.jsonschema2scala.schema.{Schema, SchemaFile, SchemaReader}
+import uk.gov.hmrc.jsonschema2scala.schema.{Schema, SchemaReader, SchemaSourceFile}
 
 import scala.io.Source
 
@@ -100,14 +100,14 @@ object SbtJsonSchema2ScalaPlugin extends AutoPlugin {
 
       println(s"Processing ${jsonSchemaFiles.size} schemas(s) with options $options")
 
-      val schemaSources: Seq[SchemaFile] = parseJsonSchemas(jsonSchemaFiles)
-      val schemas: Seq[(SchemaFile, Schema)] = schemaSources.zip(SchemaReader.readMany(schemaSources))
+      val schemaSources: Seq[SchemaSourceFile] = parseJsonSchemas(jsonSchemaFiles)
+      val schemas: Seq[(SchemaSourceFile, Schema)] = schemaSources.zip(SchemaReader.readMany(schemaSources))
 
       schemas
         .map {
           case (schemaFile, definition) =>
             ScalaCodeGenerator
-              .generateCodeFrom(
+              .generateCodeFromSchema(
                 definition,
                 options,
                 s"Generated from JSON Schema ${schemaFile.file.getName}"
@@ -144,8 +144,8 @@ object SbtJsonSchema2ScalaPlugin extends AutoPlugin {
         override def accept(dir: File, name: String): Boolean = name.endsWith(suffix)
       })
 
-    def parseJsonSchemas(files: Seq[File]): Seq[SchemaFile] =
-      files.map(SchemaFile.apply)
+    def parseJsonSchemas(files: Seq[File]): Seq[SchemaSourceFile] =
+      files.map(SchemaSourceFile.apply)
 
     def options2Variables(options: ScalaCodeGeneratorOptions): Seq[(String, String)] =
       Seq("package" -> s"package ${options.packageName}")
