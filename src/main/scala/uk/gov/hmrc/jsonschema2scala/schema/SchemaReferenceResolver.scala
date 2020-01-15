@@ -21,6 +21,7 @@ import java.net.URI
 
 import play.api.libs.json._
 
+import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.util.Try
 
@@ -30,15 +31,17 @@ trait SchemaReferenceResolver {
 
   def lookupJson(uri: URI): Option[(JsValue, SchemaReferenceResolver)]
 
-  def lookupSchema(uri: URI, reader: SchemaReader): Option[(SchemaSource, Schema)]
+  def lookupSchema(uri: URI, reader: SchemaReader): Option[(Schema, SchemaReferenceResolver)]
 
   def uriToPath(uri: URI): List[String]
 
   def resolveUri(uri: URI): URI
 
-  def listKnownUri: List[URI]
+  def listKnownUris: List[URI]
 
   def isInternal(reference: String): Boolean
+
+  def rootSchemaSourceOpt: Option[SchemaSource]
 }
 
 object SchemaReferenceResolver {
@@ -125,7 +128,9 @@ object SchemaReferenceResolver {
 
 }
 
-class CachingReferenceResolver(val schemaSource: SchemaSource, val upstreamResolver: Option[SchemaReferenceResolver])
+final class CachingReferenceResolver(
+  val schemaSource: SchemaSource,
+  val upstreamResolver: Option[SchemaReferenceResolver])
     extends SchemaReferenceResolver {
 
   import SchemaReferenceResolver._
@@ -157,7 +162,7 @@ class CachingReferenceResolver(val schemaSource: SchemaSource, val upstreamResol
     }
   }
 
-  override def lookupSchema(uri: URI, reader: SchemaReader): Option[(SchemaSource, Schema)] = {
+  override def lookupSchema(uri: URI, reader: SchemaReader): Option[(Schema, SchemaReferenceResolver)] = {
 
     val isFragmentOnly: Boolean = SchemaReferenceResolver.isFragmentOnly(uri)
     val (absolute, relative) = computeAbsoluteAndRelativeUriString(schemaSource.uri, uri)
@@ -196,7 +201,7 @@ class CachingReferenceResolver(val schemaSource: SchemaSource, val upstreamResol
 
         } else None
       }
-      .map((schemaSource, _))
+      .map((_, this))
       .orElse {
         if (isFragmentOnly) None else upstreamResolver.flatMap(_.lookupSchema(uri, reader))
       }
@@ -217,13 +222,19 @@ class CachingReferenceResolver(val schemaSource: SchemaSource, val upstreamResol
 
   override def resolveUri(givenUri: URI): URI = schemaSource.uri.resolve(givenUri)
 
-  override def listKnownUri: List[URI] =
-    schemaSource.uri :: upstreamResolver.map(_.listKnownUri).getOrElse(Nil)
+  override def listKnownUris: List[URI] =
+    schemaSource.uri :: upstreamResolver.map(_.listKnownUris).getOrElse(Nil)
+
+  @tailrec
+  def rootSchemaSourceOpt: Option[SchemaSource] = upstreamResolver match {
+    case Some(r: CachingReferenceResolver) => r.rootSchemaSourceOpt
+    case _                                 => Some(schemaSource)
+  }
 
   override def toString: String = s"CachingReferenceResolver for ${schemaSource.uri}"
 }
 
-class MultiReferenceResolver(
+final class MultiReferenceResolver(
   resolvers: Seq[SchemaReferenceResolver],
   internal: Boolean,
   upstreamResolver: Option[SchemaReferenceResolver])
@@ -238,9 +249,9 @@ class MultiReferenceResolver(
         ))
       .orElse(upstreamResolver.flatMap(_.lookupJson(uri)))
 
-  override def lookupSchema(uri: URI, reader: SchemaReader): Option[(SchemaSource, Schema)] =
+  override def lookupSchema(uri: URI, reader: SchemaReader): Option[(Schema, SchemaReferenceResolver)] =
     resolvers
-      .foldLeft[Option[(SchemaSource, Schema)]](None)(
+      .foldLeft[Option[(Schema, SchemaReferenceResolver)]](None)(
         (a, r) =>
           a.orElse(
             r.lookupSchema(uri, reader)
@@ -259,8 +270,13 @@ class MultiReferenceResolver(
 
   override def resolveUri(uri: URI): URI = uri
 
-  override def listKnownUri: List[URI] =
-    resolvers.flatMap(_.listKnownUri).toList ::: upstreamResolver.map(_.listKnownUri).getOrElse(Nil)
+  override def listKnownUris: List[URI] =
+    resolvers.flatMap(_.listKnownUris).toList ::: upstreamResolver.map(_.listKnownUris).getOrElse(Nil)
 
-  override def toString: String = s"MultiSourceReferenceResolver of size [${resolvers.size}]"
+  def rootSchemaSourceOpt: Option[SchemaSource] = upstreamResolver match {
+    case Some(r: CachingReferenceResolver) => r.rootSchemaSourceOpt
+    case _                                 => None
+  }
+
+  override def toString: String = s"MultiReferenceResolver of size [${resolvers.size}]"
 }

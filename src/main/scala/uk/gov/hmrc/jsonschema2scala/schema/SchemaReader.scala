@@ -59,7 +59,7 @@ object SchemaReader {
       case None =>
         throw new IllegalStateException(s"Unexpected error, schema lookup failed for ${schemaSource.uri}")
 
-      case Some((_, schema)) => schema
+      case Some((schema, _)) => schema
     }
   }
 
@@ -248,11 +248,9 @@ object SchemaReader {
   def attemptReadReference(p: Parameters): Option[Schema] =
     (p.json \ "$ref")
       .asOpt[String]
-      .map { reference =>
-        resolveReference(p, reference)
-      }
+      .map(readReference(p, _))
 
-  def resolveReference(p: Parameters, reference: String): Schema = {
+  def readReference(p: Parameters, reference: String): Schema = {
 
     val uri: URI = p.referenceResolver.resolveUri(URI.create(reference))
     val path2 = p.referenceResolver.uriToPath(uri)
@@ -262,14 +260,21 @@ object SchemaReader {
         uri,
         readSchema(_, path2, _, externalDescription = p.description, p.requiredFields, _, processDefinitions = true)) match {
 
-      case Some((schemaSource, referencedSchema)) =>
+      case Some((referencedSchema, resolver)) =>
         if (p.referenceResolver.isInternal(referencedSchema.uri)) {
           if (referencedSchema.primitive)
             SchemaUtils.copy(referencedSchema, p.name, "$ref" :: p.path, p.description)
           else
             InternalSchemaReference(p.a, uri.toString, referencedSchema, p.requiredFields)
-        } else
-          ExternalSchemaReference(p.a, uri.toString, referencedSchema, p.requiredFields)
+        } else {
+          ExternalSchemaReference(
+            attributes = p.a,
+            reference = uri.toString,
+            schema = referencedSchema,
+            requiredFields = p.requiredFields,
+            rootSchemaSourceOpt = if (referencedSchema.primitive) None else resolver.rootSchemaSourceOpt
+          )
+        }
 
       case None =>
         throw new IllegalStateException(
@@ -520,7 +525,7 @@ object SchemaReader {
               val path2 = referenceResolver.uriToPath(uri)
               referenceResolver
                 .lookupSchema(uri, readSchema(_, path2, _, description, Seq.empty, _, processDefinitions = true))
-                .map(_._2)
+                .map(_._1)
             })
             .collect { case Some(x) => x }
       )
