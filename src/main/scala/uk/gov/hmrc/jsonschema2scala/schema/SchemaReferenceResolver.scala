@@ -41,7 +41,7 @@ trait SchemaReferenceResolver {
 
   def isInternal(reference: String): Boolean
 
-  def rootSchemaSourceOpt: Option[SchemaSource]
+  def rootSchemaSource: Option[SchemaSource]
 }
 
 object SchemaReferenceResolver {
@@ -226,8 +226,8 @@ final class CachingReferenceResolver(
     schemaSource.uri :: upstreamResolver.map(_.listKnownUris).getOrElse(Nil)
 
   @tailrec
-  def rootSchemaSourceOpt: Option[SchemaSource] = upstreamResolver match {
-    case Some(r: CachingReferenceResolver) => r.rootSchemaSourceOpt
+  def rootSchemaSource: Option[SchemaSource] = upstreamResolver match {
+    case Some(r: CachingReferenceResolver) => r.rootSchemaSource
     case _                                 => Some(schemaSource)
   }
 
@@ -273,8 +273,8 @@ final class MultiReferenceResolver(
   override def listKnownUris: List[URI] =
     resolvers.flatMap(_.listKnownUris).toList ::: upstreamResolver.map(_.listKnownUris).getOrElse(Nil)
 
-  def rootSchemaSourceOpt: Option[SchemaSource] = upstreamResolver match {
-    case Some(r: CachingReferenceResolver) => r.rootSchemaSourceOpt
+  def rootSchemaSource: Option[SchemaSource] = upstreamResolver match {
+    case Some(r: CachingReferenceResolver) => r.rootSchemaSource
     case _                                 => None
   }
 

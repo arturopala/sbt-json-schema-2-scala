@@ -264,15 +264,28 @@ object SchemaReader {
         if (p.referenceResolver.isInternal(referencedSchema.uri)) {
           if (referencedSchema.primitive)
             SchemaUtils.copy(referencedSchema, p.name, "$ref" :: p.path, p.description)
-          else
-            InternalSchemaReference(p.a, uri.toString, referencedSchema, p.requiredFields)
+          else {
+            InternalSchemaReference(
+              attributes = p.a,
+              reference = uri.toString,
+              schema = referencedSchema,
+              requiredFields = p.requiredFields)
+          }
         } else {
+          val rootSchema: Option[Schema] =
+            if (referencedSchema.primitive) None
+            else
+              resolver.rootSchemaSource
+                .map(_.uri)
+                .flatMap(resolver.lookupSchema(_, readSchema(_, Nil, _, None, Seq.empty, _, true)))
+                .map(_._1)
+
           ExternalSchemaReference(
             attributes = p.a,
             reference = uri.toString,
             schema = referencedSchema,
             requiredFields = p.requiredFields,
-            rootSchemaSourceOpt = if (referencedSchema.primitive) None else resolver.rootSchemaSourceOpt
+            rootSchema = rootSchema
           )
         }
 

@@ -211,7 +211,7 @@ case class ExternalSchemaReference(
   reference: String,
   schema: Schema,
   requiredFields: Seq[String],
-  rootSchemaSourceOpt: Option[SchemaSource])
+  rootSchema: Option[Schema])
     extends Schema {
 
   override val primitive: Boolean = schema.primitive
