@@ -33,40 +33,37 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
     options: ScalaCodeGeneratorOptions,
     description: String): CodeGeneratorResult = {
 
-    val typeNameProvider: TypeNameProvider = ScalaTypeNameProvider
+    implicit val typeNameProvider: TypeNameProvider = ScalaTypeNameProvider
 
+    buildTypeDefinitions(schema, Map.empty).flatMap {
+      case (typeDef, typeResolver) =>
+        val context = ScalaCodeGeneratorContext(schema, options)
+
+        generateCodeFromTypeDefinition(typeDef, options.packageName, context, description)(
+          typeResolver,
+          typeNameProvider)
+    }
+  }
+
+  def buildTypeResolverFor(schema: Schema, externalTypeResolvers: Map[String, TypeResolver])(
+    implicit typeNameProvider: TypeNameProvider): TypeResolver =
+    buildTypeDefinitions(schema, externalTypeResolvers).fold(
+      errors =>
+        throw new IllegalStateException(s"Error(s) when resolving types for ${schema.uri}: ${errors.mkString(", ")}"),
+      _._2
+    )
+
+  def buildTypeDefinitions(schema: Schema, externalTypeResolvers: Map[String, TypeResolver])(
+    implicit typeNameProvider: TypeNameProvider): Either[List[String], (TypeDefinition, TypeResolver)] =
     TypeDefinitionsBuilder
       .buildFrom(schema)(typeNameProvider)
       .fold(
         errors => Left(errors),
-        typeDef => {
-
-          val schemaUriToTypePath: Map[String, List[String]] = TypeDefinition.listSchemaUriToTypePath(typeDef).toMap
-          val schemaUriToTypeInterfaces: Map[String, Seq[List[String]]] =
-            TypeDefinition.listSchemaUriToTypeInterfaces(typeDef).groupBy(_._1).mapValues(_.flatMap(_._2))
-
-          println(s"Resolved ${schemaUriToTypePath.size} schema(s) to type definition(s):")
-          println(
-            schemaUriToTypePath
-              .mapValues(_.reverse.mkString("."))
-              .toSeq
-              .sortBy(_._1)
-              .map { case (k, v) => s"\t$k -> $v" }
-              .mkString("\n"))
-
-          val typeResolver: TypeResolver =
-            new ScalaTypeResolver(schemaUriToTypePath, schemaUriToTypeInterfaces)(typeNameProvider)
-
-          generateCodeFromTypeDefinition(typeDef, options, ScalaCodeGeneratorContext(schema, options), description)(
-            typeResolver,
-            typeNameProvider)
-        }
-      )
-  }
+        typeDef => Right((typeDef, new ScalaTypeResolver(typeDef, buildTypeResolverFor)(typeNameProvider))))
 
   def generateCodeFromTypeDefinition(
     typeDef: TypeDefinition,
-    options: ScalaCodeGeneratorOptions,
+    packageName: String,
     context: ScalaCodeGeneratorContext,
     description: String)(
     implicit typeResolver: TypeResolver,
@@ -84,11 +81,11 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
              | ${renderTypesOverview(typeDef)}
              |""".stripMargin,
           doc = false
-        ))) ++ Seq(Some(Package(options.packageName))) ++
+        ))) ++ Seq(Some(Package(packageName))) ++
         generateGlobalImports(context) ++
         generateTypeDefinition(typeDef, isTopLevel = true, context)
 
-    Right((options.packageName, typeDef.name, code.collect(defined)))
+    Right((packageName, typeDef.name, code.collect(defined)))
   }
 
   def generateGlobalImports(context: ScalaCodeGeneratorContext): Seq[Option[ScalaCode]] =
@@ -894,7 +891,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
           ValueDefinition(
             name = "formats",
             returnType = s"Format[${typeDef.name}]",
-            body = Seq("Json.format[${typeDef.name}]"),
+            body = Seq(s"Json.format[${typeDef.name}]"),
             modifier = Some("implicit"))))
 
   private def quoted(s: String): String = "\"\"\"" + s + "\"\"\""

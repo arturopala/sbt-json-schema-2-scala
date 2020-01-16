@@ -71,14 +71,13 @@ object TypeDefinitionsBuilder {
       processTemplates(path, schema)
 
     val types: Seq[TypeDefinition] = schema match {
-      case objectSchema: ObjectSchema        => processObjectSchema(name, path, objectSchema)
-      case oneOfSchema: OneOfAnyOfSchema     => templates ++ processOneOfAnyOfSchema(name, path, oneOfSchema)
-      case allOfSchema: AllOfSchema          => templates ++ processAllOfSchema(name, path, allOfSchema)
-      case notSchema: NotSchema              => templates ++ processSchema(name, path, notSchema.schema)
-      case arraySchema: ArraySchema          => templates ++ processArraySchema(name, path, arraySchema)
-      case mapSchema: MapSchema              => templates ++ processMapSchema(name, path, mapSchema)
-      case external: ExternalSchemaReference => templates ++ processExternalSchemaReference(name, path, external)
-      case _                                 => templates
+      case objectSchema: ObjectSchema    => processObjectSchema(name, path, objectSchema)
+      case oneOfSchema: OneOfAnyOfSchema => templates ++ processOneOfAnyOfSchema(name, path, oneOfSchema)
+      case allOfSchema: AllOfSchema      => templates ++ processAllOfSchema(name, path, allOfSchema)
+      case notSchema: NotSchema          => templates ++ processSchema(name, path, notSchema.schema)
+      case arraySchema: ArraySchema      => templates ++ processArraySchema(name, path, arraySchema)
+      case mapSchema: MapSchema          => templates ++ processMapSchema(name, path, mapSchema)
+      case _                             => templates
     }
 
     sortByName(avoidNameCollisions(types, ""))
@@ -89,16 +88,6 @@ object TypeDefinitionsBuilder {
 
     case internalReference: InternalSchemaReference =>
       processSchema(typeNameProvider.toTypeName(internalReference.schema), Nil, internalReference.schema)
-        .map(_.copy(forReferenceOnly = true))
-
-    case _ => Seq.empty
-  }
-
-  def processExternalSchemaReference(name: String, path: List[String], schema: Schema)(
-    implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] = schema match {
-
-    case externalReference: ExternalSchemaReference =>
-      processSchema(typeNameProvider.toTypeName(externalReference.schema), Nil, externalReference.schema)
         .map(_.copy(forReferenceOnly = true))
 
     case _ => Seq.empty
@@ -147,8 +136,7 @@ object TypeDefinitionsBuilder {
 
     val arrayTypeDefinitions = arrays.flatMap { schema =>
       processSchema(name, path, schema) ++
-        processInternalSchemaReference(name, path, schema) ++
-        processExternalSchemaReference(name, path, schema)
+        processInternalSchemaReference(name, path, schema)
     }
 
     val nonArrayTypeDefinitions = nonArrays.size match {
@@ -161,8 +149,7 @@ object TypeDefinitionsBuilder {
           nonArrays
             .flatMap { schema =>
               processSchema(name, name :: path, schema) ++
-                processInternalSchemaReference(name, name :: path, schema) ++
-                processExternalSchemaReference(name, name :: path, schema)
+                processInternalSchemaReference(name, name :: path, schema)
             },
           oneOfTypeName
         )

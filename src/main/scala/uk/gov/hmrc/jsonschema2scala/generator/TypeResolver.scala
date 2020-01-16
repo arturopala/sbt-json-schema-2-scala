@@ -29,6 +29,8 @@ trait TypeResolver {
 
   def interfacesOf(schema: Schema, viewpoint: TypeDefinition): Set[String]
 
+  def resolverForSchema(schema: Schema): TypeResolver
+
 }
 
 object TypeResolver {

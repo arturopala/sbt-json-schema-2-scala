@@ -20,12 +20,46 @@ import uk.gov.hmrc.jsonschema2scala.generator.TypeResolver
 import uk.gov.hmrc.jsonschema2scala.schema._
 import uk.gov.hmrc.jsonschema2scala.typer.{TypeDefinition, TypeNameProvider}
 
+import scala.collection.mutable
+
 class ScalaTypeResolver(
-  schemaUriToTypePath: Map[String, List[String]],
-  schemaUriToTypeInterfaces: Map[String, Seq[List[String]]])(implicit schemaNameResolver: TypeNameProvider)
+  typeDef: TypeDefinition,
+  buildTypeResolverFor: (Schema, Map[String, TypeResolver]) => TypeResolver)(
+  implicit schemaNameResolver: TypeNameProvider)
     extends TypeResolver {
 
+  val schemaUriToTypePath: Map[String, List[String]] =
+    TypeDefinition.listSchemaUriToTypePath(typeDef).toMap
+
+  lazy val schemaUriToTypeInterfaces: Map[String, Seq[List[String]]] =
+    TypeDefinition.listSchemaUriToTypeInterfaces(typeDef).groupBy(_._1).mapValues(_.flatMap(_._2))
+
+  val externalTypeResolvers: mutable.Map[String, TypeResolver] =
+    collection.mutable.Map[String, TypeResolver](
+      typeDef.schema.uri -> this
+    )
+
+  def resolverForSchema(schema: Schema): TypeResolver =
+    externalTypeResolvers.get(schema.uri) match {
+      case Some(resolver) =>
+        resolver
+
+      case None =>
+        val resolver = buildTypeResolverFor(schema, externalTypeResolvers.toMap)
+        externalTypeResolvers.update(schema.uri, resolver)
+        resolver
+    }
+
   override val any: String = "Any"
+
+  println(s"Types resolved from ${schemaUriToTypePath.size} schema(s):")
+  println(
+    schemaUriToTypePath
+      .mapValues(_.reverse.mkString("."))
+      .toSeq
+      .sortBy(_._1)
+      .map { case (k, v) => s"\t$k -> $v" }
+      .mkString("\n"))
 
   override def typeOf(schema: Schema, viewpoint: TypeDefinition, wrapAsOption: Boolean): String = {
 
@@ -99,7 +133,13 @@ class ScalaTypeResolver(
         typeOf(internalReference.schema, viewpoint, wrapAsOption = false)
 
       case externalReference: ExternalSchemaReference =>
-        typeOf(externalReference.schema, viewpoint, wrapAsOption = false)
+        if (externalReference.schema.primitive) typeOf(externalReference.schema, viewpoint, wrapAsOption = false)
+        else {
+          externalReference.rootSchema
+            .map(resolverForSchema)
+            .getOrElse(this)
+            .typeOf(externalReference.schema, viewpoint, wrapAsOption = false)
+        }
 
       case schemaStub: SchemaStub =>
         schemaTypeNameAsSeenFrom(schemaStub.reference, viewpoint)
