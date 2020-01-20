@@ -19,7 +19,7 @@ package uk.gov.hmrc.jsonschema2scala
 import org.scalatest.{Assertions, Matchers}
 import play.api.libs.json.{JsObject, Json}
 import uk.gov.hmrc.jsonschema2scala.generator.scala2.{ScalaCodeGenerator, ScalaCodeGeneratorOptions}
-import uk.gov.hmrc.jsonschema2scala.schema.{Schema, SchemaReader, SchemaSource}
+import uk.gov.hmrc.jsonschema2scala.schema.{Schema, SchemaReader, SchemaReferenceResolver, SchemaSource, SchemaSourceJson}
 
 import scala.util.Random
 
@@ -32,11 +32,12 @@ trait CodeRenderingAssertions extends CompilationAssertions {
     assertCanParseAndCompile(schemaString, packageName = "a.b.c", className = randomName)
 
   def assertCanParseAndCompile(schemaSource: SchemaSource)(implicit compiler: Compiler): Unit =
-    assertCanParseAndCompile(schemaSource)
+    assertCanParseAndCompile(schemaSource, Seq.empty)
 
-  def assertCanParseAndCompile(schemaSource: SchemaSource, otherSchemas: Seq[SchemaSource])(
+  def assertCanParseAndCompile(schemaSource: SchemaSource, allSchemaSources: Seq[SchemaSource])(
     implicit compiler: Compiler): Unit = {
-    val definition = SchemaReader.read(schemaSource, otherSchemas)
+    val resolver = SchemaReferenceResolver(schemaSource, allSchemaSources)
+    val definition = SchemaReader.read(schemaSource, resolver)
     assertCanParseAndCompile(definition, packageName = "a.b.c")
   }
 
@@ -49,7 +50,9 @@ trait CodeRenderingAssertions extends CompilationAssertions {
   def assertCanParseAndCompile(schemaJson: JsObject, packageName: String, className: String)(
     implicit compiler: Compiler): Unit = {
     val options = ScalaCodeGeneratorOptions(features = Set(), packageName = packageName)
-    val definition = SchemaReader.read(className, schemaJson)
+    val schemaSource = SchemaSourceJson(className, schemaJson)
+    val resolver = SchemaReferenceResolver(schemaSource, None)
+    val definition = SchemaReader.read(schemaSource, resolver)
     val result = ScalaCodeGenerator.generateCodeFromSchema(definition, options, "")
     assertSuccessAndCompiles(result)
   }
@@ -64,7 +67,9 @@ trait CodeRenderingAssertions extends CompilationAssertions {
     val options = ScalaCodeGeneratorOptions(features = Set(), packageName = "a.b.c")
     val schemaJson = Json.parse(schemaString).as[JsObject]
     val name = randomName
-    val definition = SchemaReader.read(name, schemaJson)
+    val schemaSource = SchemaSourceJson(name, schemaJson)
+    val resolver = SchemaReferenceResolver(schemaSource, None)
+    val definition = SchemaReader.read(schemaSource, resolver)
     ScalaCodeGenerator
       .generateCodeFromSchema(definition, options, description = "") should be leftSide
   }

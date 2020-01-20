@@ -684,7 +684,7 @@ class ScalaCodeGeneratorSpec
   "Generate from known schemas" should {
 
     verifiedTestSchemas
-    //.filter(_.name == "feed.json")
+    //.filter(_.name == "vega-lite.json")
       .foreach { schema: SchemaSource =>
         s"generate from ${schema.name}" in assertCanParseAndCompile(schema, verifiedTestSchemas)
       }

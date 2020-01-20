@@ -135,8 +135,8 @@ object TypeDefinitionsBuilder {
       .partition { case _: ArraySchema => false; case _ => true }
 
     val arrayTypeDefinitions = arrays.flatMap { schema =>
-      processSchema(name, path, schema) ++
-        processInternalSchemaReference(name, path, schema)
+      processSchema(name, path, schema) /*++
+        processInternalSchemaReference(name, path, schema)*/
     }
 
     val nonArrayTypeDefinitions = nonArrays.size match {
@@ -145,7 +145,7 @@ object TypeDefinitionsBuilder {
         processSchema(name, path, nonArrays.head)
 
       case many =>
-        val subtypes = avoidNameCollisions(
+        val directSubtypes = avoidNameCollisions(
           nonArrays
             .flatMap { schema =>
               processSchema(name, name :: path, schema) ++
@@ -153,6 +153,13 @@ object TypeDefinitionsBuilder {
             },
           oneOfTypeName
         )
+
+        val referencedSubtypes = nonArrays
+          .flatMap { schema =>
+            processInternalSchemaReference(name, name :: path, schema)
+          }
+
+        val subtypes = directSubtypes ++ referencedSubtypes
 
         subtypes.size match {
           case 0 => Seq.empty
@@ -175,13 +182,10 @@ object TypeDefinitionsBuilder {
                   required = oneOfSchema.required,
                   custom = None)),
               isInterface = true,
-              subtypes = subtypes
+              subtypes = subtypes.map(_.schema)
             )
-            val subtypesExtendingSuperType = subtypes.map(s => s.copy(interfaces = s.interfaces :+ superType))
-            Seq(
-              superType.copy(
-                subtypes = subtypesExtendingSuperType,
-                nestedTypes = subtypesExtendingSuperType.filterNot(_.forReferenceOnly)))
+
+            Seq(superType.copy(nestedTypes = directSubtypes))
         }
     }
 

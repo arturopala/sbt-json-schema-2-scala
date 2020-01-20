@@ -183,7 +183,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
     val classCode: Option[ScalaCode] =
       if (typeDef.isInterface) {
         val implementingTypesComment: String = typeDef.subtypes
-          .map(t => typeResolver.typeOf(t.schema, typeDef, wrapAsOption = false))
+          .map(schema => typeResolver.typeOf(schema, typeDef, wrapAsOption = false))
           .mkString("Implementations: ", ",", "\n")
 
         Some(
@@ -198,13 +198,15 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
         val parameters = classFields ++ (if (isTopLevel && context.renderGenerators)
                                            Seq(Param("id", "Option[String] = None"))
                                          else Seq.empty)
+
+        val interfaceList: List[String] = compileClassInterfaceList(typeDef)
+
         if (parameters.nonEmpty) {
           Some(
             CaseClass(
               name = typeDef.name,
               parameters = parameters,
-              supertypes = (if (isTopLevel && context.renderGenerators) Seq("Record") else Seq.empty) ++ compileClassInterfaceList(
-                typeDef),
+              supertypes = (if (isTopLevel && context.renderGenerators) Seq("Record") else Seq.empty) ++ interfaceList,
               members = if (context.renderBuilders) generateBuilderMethods(typeDef) else Seq.empty,
               comment =
                 Some(s"${typeDef.schema.description.map(d => s"$d\n").getOrElse("")}Schema: ${typeDef.schema.uri}")
@@ -214,7 +216,8 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
             Trait(
               name = typeDef.name,
               comment =
-                Some(s"${typeDef.schema.description.map(d => s"$d\n").getOrElse("")}Schema: ${typeDef.schema.uri}")
+                Some(s"${typeDef.schema.description.map(d => s"$d\n").getOrElse("")}Schema: ${typeDef.schema.uri}"),
+              supertypes = interfaceList
             ))
         else None
       }
@@ -272,9 +275,8 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
 
   def compileClassInterfaceList(typeDef: TypeDefinition)(implicit typeResolver: TypeResolver): List[String] =
     (typeDef.interfaces
-      .map(it => typeResolver.typeOf(it.schema, typeDef, wrapAsOption = false))
-      .distinct
-      .toList ++ typeResolver.interfacesOf(typeDef.schema, typeDef)).sorted
+      .map(schema => typeResolver.typeOf(schema, typeDef, wrapAsOption = false))
+      .toList ++ typeResolver.interfacesOf(typeDef.schema, typeDef)).distinct.sorted
 
   def generateClassFields(
     typeDef: TypeDefinition)(implicit typeResolver: TypeResolver, typeNameProvider: TypeNameProvider): Seq[Param] =
@@ -305,10 +307,9 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
             modifier = None)
       }
 
-  def findCommonFields(types: Seq[TypeDefinition], viewpoint: TypeDefinition)(
+  def findCommonFields(schemas: Seq[Schema], viewpoint: TypeDefinition)(
     implicit typeResolver: TypeResolver): Set[(String, String)] =
-    types
-      .map(_.schema)
+    schemas
       .map {
         case o: ObjectSchema =>
           o.properties

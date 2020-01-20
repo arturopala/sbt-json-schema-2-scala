@@ -24,28 +24,11 @@ import scala.util.Try
 
 object SchemaReader {
 
-  def read(name: String, json: JsObject): Schema = {
-    val schemaSource = SchemaSourceJson(name, json)
-    read(schemaSource, None)
-  }
-
-  def read(name: String, json: JsObject, otherSchemas: Seq[SchemaSource]): Schema = {
-    val schemaSource = SchemaSourceJson(name, json)
-    read(schemaSource, Some(SchemaReferenceResolver(otherSchemas)))
-  }
-
-  def read(schemaSource: SchemaSource, otherSchemas: Seq[SchemaSource]): Schema =
-    read(schemaSource, Some(SchemaReferenceResolver(otherSchemas)))
-
-  def readMany(sources: Seq[SchemaSource]): Seq[Schema] =
-    sources.map(read(_, Some(SchemaReferenceResolver(sources))))
-
-  def read(schemaSource: SchemaSource, externalResolver: Option[SchemaReferenceResolver] = None): Schema = {
-    val resolver = SchemaReferenceResolver(schemaSource, externalResolver)
+  def read(schemaSource: SchemaSource, resolver: SchemaReferenceResolver): Schema = {
     val path = SchemaReferenceResolver.rootPath(schemaSource.uri)
     resolver.lookupSchema(
       schemaSource.uri,
-      (_, jsValue, resolver) =>
+      (_, jsValue, _) =>
         readSchema(
           name = schemaSource.name,
           currentPath = path,

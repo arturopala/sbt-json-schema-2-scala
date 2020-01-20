@@ -29,9 +29,9 @@ class ScalaTypeResolver(
     extends TypeResolver {
 
   val schemaUriToTypePath: Map[String, List[String]] =
-    TypeDefinition.listSchemaUriToTypePath(typeDef).toMap
+    TypeDefinition.listSchemaUriToTypePath(typeDef, excludeReferences = true).toMap
 
-  lazy val schemaUriToTypeInterfaces: Map[String, Seq[List[String]]] =
+  lazy val schemaUriToTypeInterfaces: Map[String, Seq[Schema]] =
     TypeDefinition.listSchemaUriToTypeInterfaces(typeDef).groupBy(_._1).mapValues(_.flatMap(_._2))
 
   val externalTypeResolvers: mutable.Map[String, TypeResolver] =
@@ -145,25 +145,23 @@ class ScalaTypeResolver(
         schemaTypeNameAsSeenFrom(schemaStub.reference, viewpoint)
           .getOrElse(
             throw new IllegalStateException(
-              s"Resolving type of schema reference ${schemaStub.reference}, but the type definition unknown."))
+              s"Resolving type of schema stub reference ${schemaStub.reference}, but the type definition unknown."))
 
     }
 
     if (!schema.required && wrapAsOption) s"Option[$typeName]" else typeName
   }
 
-  override def interfacesOf(schema: Schema, viewpoint: TypeDefinition): Set[String] = {
-    val hostPath = viewpoint.path.reverse
+  override def interfacesOf(schema: Schema, viewpoint: TypeDefinition): Set[String] =
     schemaUriToTypeInterfaces
       .get(schema.uri)
-      .map(_.map { interfacePath =>
-        val guestPath = interfacePath.reverse
-        val relativePath = TypeResolver.shortenPrefix(guestPath, hostPath)
-        relativePath.mkString(".")
+      .map(_.map { schema =>
+        schemaTypeNameAsSeenFrom(schema, viewpoint)
+          .getOrElse(throw new IllegalStateException(
+            s"Unknown interface type for schema ${schema.uri} as seen from ${viewpoint.name}"))
       })
       .map(_.toSet)
       .getOrElse(Set.empty)
-  }
 
   def schemaTypeNameAsSeenFrom(schema: Schema, viewpoint: TypeDefinition): Option[String] =
     schemaTypeNameAsSeenFrom(schema.uri, viewpoint)

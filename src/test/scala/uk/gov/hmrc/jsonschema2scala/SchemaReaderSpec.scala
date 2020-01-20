@@ -33,16 +33,18 @@ package uk.gov.hmrc.jsonschema2scala
  */
 
 import org.scalatest.{Matchers, WordSpec}
-import uk.gov.hmrc.jsonschema2scala.schema.SchemaReader
+import uk.gov.hmrc.jsonschema2scala.schema.{SchemaReader, SchemaReferenceResolver}
 
 class SchemaReaderSpec extends WordSpec with Matchers with TestSchemas {
 
   "SchemaReader" should {
+    val multiResolver = SchemaReferenceResolver(allSchemas)
     allSchemas
-    //.filter(_.name == "tslint.json")
+    //.filter(_.name == "compilerconfig.json")
       .foreach { schemaSource =>
         s"read ${schemaSource.name} schema" in {
-          val definition = SchemaReader.read(schemaSource, allSchemas)
+          val resolver = SchemaReferenceResolver(schemaSource, Some(multiResolver))
+          val definition = SchemaReader.read(schemaSource, resolver)
           definition.primitive shouldBe false
         }
       }

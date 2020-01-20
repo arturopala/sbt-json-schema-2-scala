@@ -79,6 +79,12 @@ object SchemaReferenceResolver {
     new MultiReferenceResolver(resolvers, false, upstreamResolver)
   }
 
+  def apply(schemaSource: SchemaSource, allSchemaSources: Seq[SchemaSource]): SchemaReferenceResolver =
+    SchemaReferenceResolver(
+      schemaSource,
+      if (allSchemaSources.isEmpty) None
+      else Some(SchemaReferenceResolver(allSchemaSources.filterNot(_ == schemaSource))))
+
   final def rootPath(uri: URI): List[String] = "#" :: uri.toString :: Nil
 
   def isFragmentOnly(uri: URI): Boolean =
@@ -126,11 +132,22 @@ object SchemaReferenceResolver {
 
   final val emptyJsObject = JsObject(Seq())
 
+  def findResolverForSchemaSource(
+    schemaSource: SchemaSource,
+    currentResolver: SchemaReferenceResolver): Option[SchemaReferenceResolver] =
+    currentResolver match {
+      case CachingReferenceResolver(s, ur) =>
+        if (s == schemaSource) Some(currentResolver) else ur.flatMap(r => findResolverForSchemaSource(schemaSource, r))
+
+      case MultiReferenceResolver(rs, _, ur) =>
+        rs.foldLeft[Option[SchemaReferenceResolver]](None)((a, r) =>
+            a.orElse(findResolverForSchemaSource(schemaSource, r)))
+          .orElse(ur.flatMap(r => findResolverForSchemaSource(schemaSource, r)))
+    }
+
 }
 
-final class CachingReferenceResolver(
-  val schemaSource: SchemaSource,
-  val upstreamResolver: Option[SchemaReferenceResolver])
+final case class CachingReferenceResolver(schemaSource: SchemaSource, upstreamResolver: Option[SchemaReferenceResolver])
     extends SchemaReferenceResolver {
 
   import SchemaReferenceResolver._
@@ -232,9 +249,10 @@ final class CachingReferenceResolver(
   }
 
   override def toString: String = s"CachingReferenceResolver for ${schemaSource.uri}"
+
 }
 
-final class MultiReferenceResolver(
+final case class MultiReferenceResolver(
   resolvers: Seq[SchemaReferenceResolver],
   internal: Boolean,
   upstreamResolver: Option[SchemaReferenceResolver])
@@ -279,4 +297,5 @@ final class MultiReferenceResolver(
   }
 
   override def toString: String = s"MultiReferenceResolver of size [${resolvers.size}]"
+
 }
