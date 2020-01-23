@@ -18,7 +18,7 @@ package uk.gov.hmrc.jsonschema2scala.typer
 
 import uk.gov.hmrc.jsonschema2scala.schema.Schema
 
-trait TypeNameProvider {
+trait NameProvider {
 
   def toTypeName(schema: Schema): String
 

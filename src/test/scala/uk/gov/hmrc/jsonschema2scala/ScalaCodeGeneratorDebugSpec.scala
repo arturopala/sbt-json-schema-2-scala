@@ -45,11 +45,12 @@ class ScalaCodeGeneratorDebugSpec
   override def afterAll(): Unit =
     compiler.cleanup()
 
-  "Generate from selected schemas" should {
+  val schemaToDebug: Set[String] =
+    Set("composer").map(n => s"$n.json")
 
+  "Generate from selected schemas" should {
     allSchemas
-    //.filter(_.name == "drone.json")
-      .filter(_.name == "gitlab-ci.json")
+      .filter(s => schemaToDebug.contains(s.name))
       .foreach { schema: SchemaSource =>
         s"generate from ${schema.name}" in assertCanParseAndCompile(schema, allSchemas)
       }

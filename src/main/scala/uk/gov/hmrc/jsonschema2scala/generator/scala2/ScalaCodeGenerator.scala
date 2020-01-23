@@ -20,7 +20,7 @@ import uk.gov.hmrc.jsonschema2scala.generator.scala2.ScalaCode._
 import uk.gov.hmrc.jsonschema2scala.generator.{CodeGenerator, TypeResolver}
 import uk.gov.hmrc.jsonschema2scala.schema.NameUtils.{firstCharUppercase, normalize, pathLastPart, variableName}
 import uk.gov.hmrc.jsonschema2scala.schema._
-import uk.gov.hmrc.jsonschema2scala.typer.{ScalaTypeNameProvider, TypeDefinition, TypeDefinitionsBuilder, TypeNameProvider}
+import uk.gov.hmrc.jsonschema2scala.typer.{NameProvider, TypeDefinition, TypeDefinitionsBuilder}
 
 object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
 
@@ -34,20 +34,18 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
     description: String,
     schemaReferenceResolver: SchemaReferenceResolver): CodeGeneratorResult = {
 
-    implicit val typeNameProvider: TypeNameProvider = ScalaTypeNameProvider
+    implicit val nameProvider: NameProvider = ScalaNameProvider$
 
-    buildTypeDefinitions(schema, Map.empty)(typeNameProvider, schemaReferenceResolver).flatMap {
+    buildTypeDefinitions(schema, Map.empty)(nameProvider, schemaReferenceResolver).flatMap {
       case (typeDef, typeResolver) =>
         val context = ScalaCodeGeneratorContext(schema, options)
 
-        generateCodeFromTypeDefinition(typeDef, options.packageName, context, description)(
-          typeResolver,
-          typeNameProvider)
+        generateCodeFromTypeDefinition(typeDef, options.packageName, context, description)(typeResolver, nameProvider)
     }
   }
 
   def buildTypeResolverFor(schema: Schema, externalTypeResolvers: Map[String, TypeResolver])(
-    implicit typeNameProvider: TypeNameProvider,
+    implicit nameProvider: NameProvider,
     schemaResolver: SchemaReferenceResolver): TypeResolver =
     buildTypeDefinitions(schema, externalTypeResolvers).fold(
       errors =>
@@ -56,10 +54,10 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
     )
 
   def buildTypeDefinitions(schema: Schema, externalTypeResolvers: Map[String, TypeResolver])(
-    implicit typeNameProvider: TypeNameProvider,
+    implicit nameProvider: NameProvider,
     schemaReferenceResolver: SchemaReferenceResolver): Either[List[String], (TypeDefinition, TypeResolver)] =
     TypeDefinitionsBuilder
-      .buildFrom(schema)(typeNameProvider)
+      .buildFrom(schema)(nameProvider)
       .fold(
         errors => Left(errors),
         typeDef => Right((typeDef, new ScalaTypeResolver(typeDef, buildTypeResolverFor, schemaReferenceResolver))))
@@ -68,9 +66,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
     typeDef: TypeDefinition,
     packageName: String,
     context: ScalaCodeGeneratorContext,
-    description: String)(
-    implicit typeResolver: TypeResolver,
-    typeNameProvider: TypeNameProvider): CodeGeneratorResult = {
+    description: String)(implicit typeResolver: TypeResolver, nameProvider: NameProvider): CodeGeneratorResult = {
 
     val code: Seq[Option[ScalaCode]] =
       Seq(
@@ -109,7 +105,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
 
   def generateTypeDefinition(typeDef: TypeDefinition, isTopLevel: Boolean, context: ScalaCodeGeneratorContext)(
     implicit typeResolver: TypeResolver,
-    typeNameProvider: TypeNameProvider): Seq[Option[ScalaCode]] = {
+    nameProvider: NameProvider): Seq[Option[ScalaCode]] = {
 
     lazy val classFields: Seq[Param] =
       generateClassFields(typeDef)
@@ -273,13 +269,13 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
       .toList ++ typeResolver.interfacesOf(typeDef.schema, typeDef)).distinct.sorted
 
   def generateClassFields(
-    typeDef: TypeDefinition)(implicit typeResolver: TypeResolver, typeNameProvider: TypeNameProvider): Seq[Param] =
+    typeDef: TypeDefinition)(implicit typeResolver: TypeResolver, nameProvider: NameProvider): Seq[Param] =
     typeDef.schema.properties
       .take(maxNumberOfArgs)
       .sortBy(fieldOrder)
       .map(schema =>
         Param(
-          name = typeNameProvider.toIdentifier(schema.name),
+          name = nameProvider.toIdentifier(schema.name),
           typeName = typeResolver.typeOf(schema, typeDef, wrapAsOption = true),
           defaultValue = if (!schema.required) Some("None") else if (schema.boolean) Some("false") else None,
           comment = schema.description
@@ -288,13 +284,13 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
   def fieldOrder(schema: Schema): Int = if (schema.required) 0 else if (schema.boolean) 1 else 2
 
   def generateInterfaceMethods(interfaceFields: Set[(String, String)])(
-    implicit typeNameProvider: TypeNameProvider): Seq[ScalaCode] =
+    implicit nameProvider: NameProvider): Seq[ScalaCode] =
     interfaceFields.toSeq
       .sortBy(_._1)
       .map {
         case (fieldName, fieldTypeName) =>
           MethodDefinition(
-            name = typeNameProvider.toIdentifier(fieldName),
+            name = nameProvider.toIdentifier(fieldName),
             parameters = Seq.empty,
             returnType = fieldTypeName,
             body = Seq.empty,
@@ -317,22 +313,22 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
 
   def generateFieldGenerators(typeDef: TypeDefinition, context: ScalaCodeGeneratorContext)(
     implicit typeResolver: TypeResolver,
-    typeNameProvider: TypeNameProvider): String =
+    nameProvider: NameProvider): String =
     typeDef.schema.properties
       .filter(_.required)
       .take(maxNumberOfArgs)
       .map(prop => s"""${variableName(prop)} <- ${generateValueGenerator(typeDef, prop, context)}""".stripMargin)
       .mkString("\n    ")
 
-  def generateGenFieldsInitialization(typeDef: TypeDefinition)(implicit typeNameProvider: TypeNameProvider): String =
+  def generateGenFieldsInitialization(typeDef: TypeDefinition)(implicit nameProvider: NameProvider): String =
     typeDef.schema.properties
       .filter(_.required)
       .take(maxNumberOfArgs)
-      .map(prop => s"""${typeNameProvider.toIdentifier(prop.name)} = ${variableName(prop)}""".stripMargin)
+      .map(prop => s"""${nameProvider.toIdentifier(prop.name)} = ${variableName(prop)}""".stripMargin)
       .mkString("\n    ", ",\n    ", "\n  ")
 
   def generateBuilderMethods(
-    typeDef: TypeDefinition)(implicit typeResolver: TypeResolver, typeNameProvider: TypeNameProvider): Seq[ScalaCode] =
+    typeDef: TypeDefinition)(implicit typeResolver: TypeResolver, nameProvider: NameProvider): Seq[ScalaCode] =
     typeDef.schema.properties
       .take(maxNumberOfArgs)
       .flatMap(schema => {
@@ -340,17 +336,16 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
         Seq(
           MethodDefinition(
             name = s"with${firstCharUppercase(normalize(schema.name))}",
-            parameters = Seq(Param(typeNameProvider.toIdentifier(schema.name), typeName)),
+            parameters = Seq(Param(nameProvider.toIdentifier(schema.name), typeName)),
             returnType = typeDef.name,
-            body = Seq(
-              s"copy(${typeNameProvider.toIdentifier(schema.name)} = ${typeNameProvider.toIdentifier(schema.name)})")
+            body = Seq(s"copy(${nameProvider.toIdentifier(schema.name)} = ${nameProvider.toIdentifier(schema.name)})")
           ),
           MethodDefinition(
             name = s"modify${firstCharUppercase(normalize(schema.name))}",
             parameters = Seq(Param("pf", s"PartialFunction[$typeName, $typeName]")),
             returnType = typeDef.name,
-            body = Seq(s"if (pf.isDefinedAt(${typeNameProvider.toIdentifier(schema.name)})) copy(${typeNameProvider
-              .toIdentifier(schema.name)} = pf(${typeNameProvider.toIdentifier(schema.name)})) else this")
+            body = Seq(s"if (pf.isDefinedAt(${nameProvider.toIdentifier(schema.name)})) copy(${nameProvider
+              .toIdentifier(schema.name)} = pf(${nameProvider.toIdentifier(schema.name)})) else this")
           )
         )
       })
@@ -359,7 +354,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
     hostType: TypeDefinition,
     property: Schema,
     context: ScalaCodeGeneratorContext,
-    wrapOption: Boolean = true)(implicit typeResolver: TypeResolver, typeNameProvider: TypeNameProvider): String = {
+    wrapOption: Boolean = true)(implicit typeResolver: TypeResolver, nameProvider: NameProvider): String = {
     val gen = knownFieldGenerators(property.name)
       .orElse(knownFieldGenerators(pathLastPart(property)))
       .getOrElse(property match {
@@ -402,20 +397,20 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
               case _           => "???" //FIXME add multi-item array support
             }
             .getOrElse("Gen.chooseNum(1, 1000)")})"
-        case o: ObjectSchema => s"${typeNameProvider.toTypeName(o)}.gen"
+        case o: ObjectSchema => s"${nameProvider.toTypeName(o)}.gen"
 
         case o: OneOfAnyOfSchema =>
           if (o.variants.isEmpty) "???"
           else if (o.variants.size == 1) generateValueGenerator(hostType, o.variants.head, context)
           else
             o.variants.head match {
-              case _: ObjectSchema => s"${typeNameProvider.toTypeName(o)}.gen"
+              case _: ObjectSchema => s"${nameProvider.toTypeName(o)}.gen"
               case _ =>
-                s"Gen.oneOf[${typeNameProvider.toTypeName(o)}](${o.variants
+                s"Gen.oneOf[${nameProvider.toTypeName(o)}](${o.variants
                   .map(v => s"${generateValueGenerator(hostType, v, context)}.map(_.asInstanceOf[${typeResolver.typeOf(v, hostType, wrapAsOption = true)}])")
                   .mkString(",\n  ")})"
             }
-        case e: ExternalSchemaReference => s"${typeNameProvider.toTypeName(e)}.gen"
+        case e: ExternalSchemaReference => s"${nameProvider.toTypeName(e)}.gen"
       })
 
     val genWithConstraints = property match {
@@ -432,7 +427,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
 
   def generatePropertyValidators(typeDef: TypeDefinition, context: ScalaCodeGeneratorContext)(
     implicit typeResolver: TypeResolver,
-    typeNameProvider: TypeNameProvider): Seq[Option[ScalaCode]] =
+    nameProvider: NameProvider): Seq[Option[ScalaCode]] =
     if (!context.renderValidators) Seq.empty
     else
       typeDef.schema.properties
@@ -450,7 +445,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
         }
 
   def generateObjectValidator(typeDef: TypeDefinition, context: ScalaCodeGeneratorContext)(
-    implicit typeNameProvider: TypeNameProvider): String = {
+    implicit nameProvider: NameProvider): String = {
     val propertyValidatorsCalls = typeDef.schema.properties
       .take(maxNumberOfArgs)
       .map(prop => generateValueValidatorCall(prop, context))
@@ -478,7 +473,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
     isMandatory: Boolean = false,
     extractProperty: Boolean = true)(
     implicit typeResolver: TypeResolver,
-    typeNameProvider: TypeNameProvider): Option[String] = {
+    nameProvider: NameProvider): Option[String] = {
     val propertyReference = if (extractProperty) s"_.${property.name}" else "_"
     val propertyExtractor = if (extractProperty) s"_.${property.name}" else "identity"
     property match {
@@ -516,7 +511,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
 
       case a: ArraySchema =>
         val itemValidator: Option[String] = (a.items match {
-          case Some((o: ObjectSchema) :: Nil) => Some(s"""${typeNameProvider.toTypeName(o)}.validate""")
+          case Some((o: ObjectSchema) :: Nil) => Some(s"""${nameProvider.toTypeName(o)}.validate""")
           case Some(x :: Nil)                 => generateValueValidator(x, context)
           case _                              => None //FIXME add multi-item array support
         }).map(vv =>
@@ -534,8 +529,8 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
 
       case _: ObjectSchema =>
         if (property.required || isMandatory)
-          Some(s""" checkProperty($propertyExtractor, ${typeNameProvider.toTypeName(property)}.validate)""")
-        else Some(s"""  checkIfSome($propertyExtractor, ${typeNameProvider.toTypeName(property)}.validate)""")
+          Some(s""" checkProperty($propertyExtractor, ${nameProvider.toTypeName(property)}.validate)""")
+        else Some(s"""  checkIfSome($propertyExtractor, ${nameProvider.toTypeName(property)}.validate)""")
 
       case o: OneOfAnyOfSchema =>
         if (o.variants.isEmpty) None
@@ -544,8 +539,8 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
           o.variants.head match {
             case _: ObjectSchema =>
               if (property.required || isMandatory)
-                Some(s""" checkProperty($propertyExtractor, ${typeNameProvider.toTypeName(property)}.validate)""")
-              else Some(s"""  checkIfSome($propertyExtractor, ${typeNameProvider.toTypeName(property)}.validate)""")
+                Some(s""" checkProperty($propertyExtractor, ${nameProvider.toTypeName(property)}.validate)""")
+              else Some(s"""  checkIfSome($propertyExtractor, ${nameProvider.toTypeName(property)}.validate)""")
             case _ =>
               generateValueValidator(o.variants.head, context, o.required)
           }
@@ -553,16 +548,16 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
       case _: BooleanSchema => None
       case _: ExternalSchemaReference =>
         if (property.required || isMandatory)
-          Some(s""" checkProperty($propertyExtractor, ${typeNameProvider.toTypeName(property)}.validate)""")
-        else Some(s"""  checkIfSome($propertyExtractor, ${typeNameProvider.toTypeName(property)}.validate)""")
+          Some(s""" checkProperty($propertyExtractor, ${nameProvider.toTypeName(property)}.validate)""")
+        else Some(s"""  checkIfSome($propertyExtractor, ${nameProvider.toTypeName(property)}.validate)""")
     }
   }
 
   def generateValueValidatorCall(property: Schema, context: ScalaCodeGeneratorContext, isMandatory: Boolean = false)(
-    implicit typeNameProvider: TypeNameProvider): Option[String] =
+    implicit nameProvider: NameProvider): Option[String] =
     property match {
       case d: Schema if d.validated =>
-        Some(s"""  checkProperty(_.${typeNameProvider.toIdentifier(property.name)}, ${property.name}Validator)""")
+        Some(s"""  checkProperty(_.${nameProvider.toIdentifier(property.name)}, ${property.name}Validator)""")
       case _ => None
     }
 
@@ -583,7 +578,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
 
   def generateSanitizers(typeDef: TypeDefinition, context: ScalaCodeGeneratorContext)(
     implicit typeResolver: TypeResolver,
-    typeNameProvider: TypeNameProvider): Seq[Option[ScalaCode]] = {
+    nameProvider: NameProvider): Seq[Option[ScalaCode]] = {
     val simpleSanitizers: Seq[Option[ScalaCode]] = typeDef.schema.properties
       .take(maxNumberOfArgs)
       .toList
@@ -596,26 +591,26 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
                 name = s"${schema.name}Sanitizer",
                 returnType = "Update",
                 body = Seq(s"""seed => entity =>
-                              |    entity.copy(${typeNameProvider.toIdentifier(schema.name)} = ${schema match {
+                              |    entity.copy(${nameProvider.toIdentifier(schema.name)} = ${schema match {
                                 case o: ObjectSchema =>
-                                  s"${typeNameProvider.toTypeName(o)}.sanitize(seed)(entity.${typeNameProvider
+                                  s"${nameProvider.toTypeName(o)}.sanitize(seed)(entity.${nameProvider
                                     .toIdentifier(schema.name)})"
                                 case a: ArraySchema if !a.allItemsPrimitive =>
-                                  s"entity.${typeNameProvider.toIdentifier(schema.name)}.map(item => ${typeNameProvider
+                                  s"entity.${nameProvider.toIdentifier(schema.name)}.map(item => ${nameProvider
                                     .toTypeName(a.items.get.head)}.sanitize(seed)(item))"
                                 case o: OneOfAnyOfSchema if o.variants.nonEmpty && !o.variants.head.primitive =>
                                   if (o.variants.size == 1)
-                                    s"${typeNameProvider.toTypeName(o.variants.head)}.sanitize(seed)(entity.${typeNameProvider
+                                    s"${nameProvider.toTypeName(o.variants.head)}.sanitize(seed)(entity.${nameProvider
                                       .toIdentifier(schema.name)})"
                                   else
                                     o.variants
                                       .map(v =>
-                                        s"case x:${typeNameProvider.toTypeName(v)} => ${typeNameProvider.toTypeName(v)}.sanitize(seed)(x)")
+                                        s"case x:${nameProvider.toTypeName(v)} => ${nameProvider.toTypeName(v)}.sanitize(seed)(x)")
                                       .mkString(
-                                        s"entity.${typeNameProvider.toIdentifier(schema.name)} match {\n  ",
+                                        s"entity.${nameProvider.toIdentifier(schema.name)} match {\n  ",
                                         "\n  ",
                                         "\n}")
-                                case _ => s"entity.${typeNameProvider.toIdentifier(schema.name)}"
+                                case _ => s"entity.${nameProvider.toIdentifier(schema.name)}"
                               }})
          """.stripMargin)
               ))
@@ -639,7 +634,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
            """.stripMargin
             } else
               s"""seed => entity =>
-                 |    entity.copy(${typeNameProvider.toIdentifier(schema.name)} = entity.${typeNameProvider
+                 |    entity.copy(${nameProvider.toIdentifier(schema.name)} = entity.${nameProvider
                    .toIdentifier(schema.name)}
                  |      .orElse(Generator.get(${generateValueGenerator(typeDef, schema, context, wrapOption = false)})(seed))${generateSanitizerSuffix(
                    schema)})
@@ -652,7 +647,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
 
   def generateAlternativeSanitizers(typeDef: TypeDefinition, context: ScalaCodeGeneratorContext)(
     implicit typeResolver: TypeResolver,
-    typeNameProvider: TypeNameProvider): Seq[Option[ScalaCode]] = {
+    nameProvider: NameProvider): Seq[Option[ScalaCode]] = {
 
     val compoundSanitizers: Seq[Option[ScalaCode]] = typeDef.schema.alternativeRequiredFields.toList
       .map(
@@ -692,7 +687,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
     excluded: Set[String],
     context: ScalaCodeGeneratorContext)(
     implicit typeResolver: TypeResolver,
-    typeNameProvider: TypeNameProvider): Option[ScalaCode] =
+    nameProvider: NameProvider): Option[ScalaCode] =
     Some(
       ValueDefinition(
         name = s"${generateComposedFieldName(included.toSeq, "And")}CompoundSanitizer",
@@ -733,17 +728,16 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
                       |   )""".stripMargin)
       ))
 
-  def generateSanitizerSuffix(
-    schema: Schema)(implicit typeResolver: TypeResolver, typeNameProvider: TypeNameProvider): String =
+  def generateSanitizerSuffix(schema: Schema)(implicit typeResolver: TypeResolver, nameProvider: NameProvider): String =
     schema match {
       case a: ArraySchema =>
-        s".map(_.map(${a.items.map(items => typeNameProvider.toTypeName(items.head)).getOrElse(typeResolver.any)}.sanitize(seed)))"
-      case o: ObjectSchema => s".map(${typeNameProvider.toTypeName(o)}.sanitize(seed))"
+        s".map(_.map(${a.items.map(items => nameProvider.toTypeName(items.head)).getOrElse(typeResolver.any)}.sanitize(seed)))"
+      case o: ObjectSchema => s".map(${nameProvider.toTypeName(o)}.sanitize(seed))"
       case o: OneOfAnyOfSchema =>
         if (o.variants.isEmpty) ""
         else if (o.variants.size == 1) generateSanitizerSuffix(o.variants.head)
         else
-          s""".map(${typeNameProvider.toTypeName(o)}.sanitize(seed))"""
+          s""".map(${nameProvider.toTypeName(o)}.sanitize(seed))"""
       case _ => ""
     }
 
@@ -824,11 +818,17 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
     } else Seq()
 
   def generateCommonObjectDeclaration(context: ScalaCodeGeneratorContext): Seq[Option[ScalaCode]] =
-    if (context.commonVals.isEmpty) Seq.empty
+    if (context.commonValues.isEmpty) Seq.empty
     else
-      Seq(Some(Object(name = "Common", supertypes = Seq.empty, members = context.commonVals.map {
-        case (value, name) => ValueDefinition(name = name, returnType = null, body = Seq(value))
-      }.toSeq)))
+      Seq(
+        Some(
+          Object(
+            name = "Common",
+            supertypes = Seq.empty,
+            members = context.commonValues.map {
+              case (value, name) => ValueDefinition(name = name, returnType = null, body = Seq(value))
+            }.toSeq
+          )))
 
   def generateJsonFormats(typeDef: TypeDefinition, context: ScalaCodeGeneratorContext): Seq[Option[ScalaCode]] =
     if (!context.renderPlayJson) Seq.empty

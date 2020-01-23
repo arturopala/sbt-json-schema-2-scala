@@ -20,7 +20,7 @@ import uk.gov.hmrc.jsonschema2scala.schema._
 
 object TypeDefinitionsBuilder {
 
-  def buildFrom(schema: Schema)(implicit typeNameProvider: TypeNameProvider): Either[List[String], TypeDefinition] = {
+  def buildFrom(schema: Schema)(implicit typeNameProvider: NameProvider): Either[List[String], TypeDefinition] = {
 
     val name = typeNameProvider.toTypeName(schema)
     val types = TypeDefinitionsBuilder
@@ -65,7 +65,7 @@ object TypeDefinitionsBuilder {
   }
 
   def processSchema(name: String, path: List[String], schema: Schema)(
-    implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] = {
+    implicit typeNameProvider: NameProvider): Seq[TypeDefinition] = {
 
     lazy val templates: Seq[TypeDefinition] =
       processTemplates(path, schema)
@@ -84,7 +84,7 @@ object TypeDefinitionsBuilder {
   }
 
   def processInternalSchemaReference(name: String, path: List[String], schema: Schema)(
-    implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] = schema match {
+    implicit typeNameProvider: NameProvider): Seq[TypeDefinition] = schema match {
 
     case internalReference: InternalSchemaReference =>
       processSchema(typeNameProvider.toTypeName(internalReference.schema), Nil, internalReference.schema)
@@ -94,7 +94,7 @@ object TypeDefinitionsBuilder {
   }
 
   def processTemplates(path: List[String], schema: Schema)(
-    implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] =
+    implicit typeNameProvider: NameProvider): Seq[TypeDefinition] =
     schema.definitions
       .flatMap { schema =>
         val childTypeName = typeNameProvider.toTypeName(schema)
@@ -103,7 +103,7 @@ object TypeDefinitionsBuilder {
       .sortBy(_.name)
 
   def processObjectSchema(name: String, path: List[String], objectSchema: ObjectSchema)(
-    implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] =
+    implicit typeNameProvider: NameProvider): Seq[TypeDefinition] =
     if (objectSchema.isEmpty) Seq.empty
     else {
 
@@ -128,7 +128,7 @@ object TypeDefinitionsBuilder {
     }
 
   def processOneOfAnyOfSchema(name: String, path: List[String], oneOfSchema: OneOfAnyOfSchema)(
-    implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] = {
+    implicit typeNameProvider: NameProvider): Seq[TypeDefinition] = {
 
     val nonPrimitives: Seq[Schema] = oneOfSchema.variants.filterNot(_.primitive)
     val oneOfTypeName = typeNameProvider.toTypeName(oneOfSchema)
@@ -206,7 +206,7 @@ object TypeDefinitionsBuilder {
   }
 
   def processAllOfSchema(name: String, path: List[String], allOfSchema: AllOfSchema)(
-    implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] = {
+    implicit typeNameProvider: NameProvider): Seq[TypeDefinition] = {
 
     val templates = allOfSchema.variants.flatMap(processTemplates(name :: path, _))
 
@@ -214,12 +214,12 @@ object TypeDefinitionsBuilder {
   }
 
   def processArraySchema(name: String, path: List[String], arraySchema: ArraySchema)(
-    implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] =
+    implicit typeNameProvider: NameProvider): Seq[TypeDefinition] =
     arraySchema.items.toSeq
       .flatMap(_.flatMap(item => processSchema(typeNameProvider.toTypeName(item), path, item)))
 
   def processMapSchema(name: String, path: List[String], mapSchema: MapSchema)(
-    implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] = {
+    implicit typeNameProvider: NameProvider): Seq[TypeDefinition] = {
 
     val nonPrimitive = mapSchema.patternProperties.filterNot(_.primitive)
 
@@ -232,7 +232,7 @@ object TypeDefinitionsBuilder {
     typeDefinitions
   }
 
-  def calculateExternalImports(schema: ObjectSchema)(implicit typeNameProvider: TypeNameProvider): Set[String] =
+  def calculateExternalImports(schema: ObjectSchema)(implicit typeNameProvider: NameProvider): Set[String] =
     schema.properties.flatMap {
       case objectSchema: ObjectSchema =>
         calculateExternalImports(objectSchema)

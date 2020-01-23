@@ -17,16 +17,17 @@
 package uk.gov.hmrc.jsonschema2scala.generator.scala2
 
 import uk.gov.hmrc.jsonschema2scala.schema._
-import uk.gov.hmrc.jsonschema2scala.typer.ScalaTypeNameProvider
+import uk.gov.hmrc.jsonschema2scala.typer.NameProvider
 
 object ScalaCodeGeneratorContext {
 
-  def apply(schema: Schema, options: ScalaCodeGeneratorOptions): ScalaCodeGeneratorContext = {
+  def apply(schema: Schema, options: ScalaCodeGeneratorOptions)(
+    implicit nameProvider: NameProvider): ScalaCodeGeneratorContext = {
 
     val uniqueKey = findUniqueKey(schema)
     val keys = findKeys(schema)
 
-    val externalizedStrings = mapCommonVals(schema)
+    val externalizedStrings = collectCommonValues(schema)
       .groupBy(_._1)
       .mapValues(_.map(_._2).map(_.replaceAll("\\d", "")).distinct.minBy(_.length))
       .groupBy(_._2)
@@ -36,7 +37,8 @@ object ScalaCodeGeneratorContext {
     ScalaCodeGeneratorContext(options, uniqueKey, keys, externalizedStrings)
   }
 
-  private def findUniqueKey(schema: Schema, path: List[Schema] = Nil): Option[(String, String)] =
+  private def findUniqueKey(schema: Schema, path: List[Schema] = Nil)(
+    implicit nameProvider: NameProvider): Option[(String, String)] =
     (schema match {
       case s: StringSchema => if (s.hasCustom("x_uniqueKey")) Some((accessorFor(s :: path), s.name)) else None
       case o: ObjectSchema =>
@@ -45,7 +47,8 @@ object ScalaCodeGeneratorContext {
     }).orElse(schema.definitions
       .foldLeft[Option[(String, String)]](None)((a, p) => a.orElse(findUniqueKey(p, path))))
 
-  private def findKeys(schema: Schema, path: List[Schema] = Nil): Seq[(String, String)] =
+  private def findKeys(schema: Schema, path: List[Schema] = Nil)(
+    implicit nameProvider: NameProvider): Seq[(String, String)] =
     (schema match {
       case s: StringSchema => if (s.hasCustom("x_key")) Seq((accessorFor(s :: path), s.name)) else Seq.empty
       case o: ObjectSchema =>
@@ -53,11 +56,12 @@ object ScalaCodeGeneratorContext {
       case _ => Seq.empty
     }) ++ schema.definitions.flatMap(s => findKeys(s, s :: path))
 
-  private def accessorFor(path: List[Schema], nested: String = "", option: Boolean = false): String = path match {
+  private def accessorFor(path: List[Schema], nested: String = "", option: Boolean = false)(
+    implicit nameProvider: NameProvider): String = path match {
     case (o: ObjectSchema) :: xs =>
       val prefix =
         if (o.name.isEmpty) ""
-        else if (o.required) s"${ScalaTypeNameProvider.toIdentifier(o.name)}."
+        else if (o.required) s"${nameProvider.toIdentifier(o.name)}."
         else s"${o.name}.${if (option) "flatMap" else "map"}(_."
       val suffix = if (o.name.isEmpty) "" else if (!o.required) ")" else ""
       accessorFor(xs, prefix + nested + suffix, !o.required || option)
@@ -66,35 +70,35 @@ object ScalaCodeGeneratorContext {
     case Nil => if (option) nested else s"Option($nested)"
   }
 
-  private def externalizePattern(schema: StringSchema): Seq[(String, String)] =
+  private def externalizePattern(schema: StringSchema)(implicit nameProvider: NameProvider): Seq[(String, String)] =
     schema.pattern
       .map(p => {
         val key = quoted(p)
-        (key, s"${schema.name}Pattern")
+        (key, s"${nameProvider.toIdentifier(schema.name + "Pattern")}")
       })
       .toSeq
 
-  private def externalizeEnum(schema: StringSchema): Seq[(String, String)] =
+  private def externalizeEnum(schema: StringSchema)(implicit nameProvider: NameProvider): Seq[(String, String)] =
     schema.enum
-      .map(e => (s"""Seq(${e.mkString("\"", "\",\"", "\"")})""", s"${schema.name}Enum"))
+      .map(e => (s"""Seq(${e.mkString("\"", "\",\"", "\"")})""", s"${nameProvider.toIdentifier(schema.name + "Enum")}"))
       .toSeq
 
-  private def mapCommonVals(schema: Schema): Seq[(String, String)] =
-    schema.definitions.flatMap(mapCommonVals) ++
+  private def collectCommonValues(schema: Schema)(implicit nameProvider: NameProvider): Seq[(String, String)] =
+    schema.definitions.flatMap(collectCommonValues) ++
       (schema match {
         case stringSchema: StringSchema =>
           externalizePattern(stringSchema) ++ externalizeEnum(stringSchema)
         case objectSchema: ObjectSchema =>
-          val m1 = objectSchema.properties.flatMap(mapCommonVals)
-          objectSchema.patternProperties.map(_.flatMap(mapCommonVals)).getOrElse(m1)
+          val m1 = objectSchema.properties.flatMap(collectCommonValues)
+          objectSchema.patternProperties.map(_.flatMap(collectCommonValues)).getOrElse(m1)
         case mapSchema: MapSchema =>
-          mapSchema.patternProperties.flatMap(mapCommonVals)
+          mapSchema.patternProperties.flatMap(collectCommonValues)
         case oneOfSchema: OneOfAnyOfSchema =>
-          oneOfSchema.variants.flatMap(mapCommonVals)
+          oneOfSchema.variants.flatMap(collectCommonValues)
         case allOfSchema: AllOfSchema =>
-          allOfSchema.variants.flatMap(mapCommonVals)
+          allOfSchema.variants.flatMap(collectCommonValues)
         case arraySchema: ArraySchema =>
-          arraySchema.items.map(_.flatMap(mapCommonVals)).getOrElse(Seq.empty)
+          arraySchema.items.map(_.flatMap(collectCommonValues)).getOrElse(Seq.empty)
         case _ => Seq.empty
       })
 
@@ -105,7 +109,7 @@ case class ScalaCodeGeneratorContext(
   options: ScalaCodeGeneratorOptions,
   uniqueKey: Option[(String, String)],
   keys: Seq[(String, String)],
-  commonVals: Map[String, String]) {
+  commonValues: Map[String, String]) {
 
   val renderGenerators: Boolean = options.features.contains(JsonSchema2ScalaFeature.Generator)
   val renderValidators: Boolean = options.features.contains(JsonSchema2ScalaFeature.Validator)
@@ -120,6 +124,6 @@ case class ScalaCodeGeneratorContext(
   val validatorsOpt: Option[Unit] = toOption(options.features.contains(JsonSchema2ScalaFeature.Validator))
   val playJsonOpt: Option[Unit] = toOption(options.features.contains(JsonSchema2ScalaFeature.PlayJson))
 
-  def commonReference(s: String): String = commonVals.get(s).map(n => s"Common.$n").getOrElse(s)
+  def commonReference(s: String): String = commonValues.get(s).map(n => s"Common.$n").getOrElse(s)
 
 }
