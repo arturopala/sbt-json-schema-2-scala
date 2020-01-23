@@ -101,7 +101,7 @@ object Vocabulary {
     exclusiveMinimum
   )
 
-  final val validationVocabulary: Set[String] = Set(
+  final val commonValidationVocabulary: Set[String] = Set(
     `type`,
     enum,
     const,
@@ -109,14 +109,58 @@ object Vocabulary {
     contentEncoding,
     contentMediaType,
     contentSchema
-  ) ++
+  )
+
+  final val validationVocabulary: Set[String] = commonValidationVocabulary ++
     objectValidationVocabulary ++
     arrayValidationVocabulary ++
     stringValidationVocabulary ++
     numberValidationVocabulary
 
+  final val objectVocabulary = objectCoreVocabulary ++ objectValidationVocabulary
+  final val arrayVocabulary = arrayCoreVocabulary ++ arrayValidationVocabulary
   final val allKeywords: Set[String] = coreVocabulary ++ validationVocabulary
-
   final val allKeywordsButMeta: Set[String] = allKeywords.diff(metaCoreVocabulary)
+  final val allKeywordsButObject: Set[String] = allKeywords.diff(objectVocabulary)
+  final val jsonObjectKeywords: Set[String] =
+    Set(properties, additionalProperties, patternProperties, definitions, items)
+  final val jsonArrayKeywords: Set[String] = Set(items, additionalItems, allOf, anyOf, oneOf, not)
+
+  object holdsJsonObject {
+    def unapply(keyword: String): Option[String] =
+      Some(keyword).filter(jsonObjectKeywords.contains)
+  }
+
+  object holdsJsonArray {
+    def unapply(keyword: String): Option[String] =
+      Some(keyword).filter(jsonArrayKeywords.contains)
+  }
+
+  case class isInVocabulary(vocabulary: Set[String]) {
+    def unapply(keyword: String): Option[String] =
+      Some(keyword).filter(vocabulary.contains)
+  }
+
+  def vocabularyOfSchemaType(schema: Schema): Set[String] = schema match {
+    case _: ObjectSchema                   => objectVocabulary
+    case _: ArraySchema                    => arrayVocabulary
+    case _: MapSchema                      => Set(patternProperties, required)
+    case o: OneOfAnyOfSchema if o.isOneOf  => Set(oneOf)
+    case o: OneOfAnyOfSchema if !o.isOneOf => Set(anyOf)
+    case _: AllOfSchema                    => Set(allOf)
+    case _: NotSchema                      => Set(not)
+    case _: IfThenElseSchema               => Set(`if`, `then`, `else`)
+    case _: StringSchema                   => stringValidationVocabulary ++ commonValidationVocabulary
+    case _: NumberSchema                   => numberValidationVocabulary ++ commonValidationVocabulary
+    case _: IntegerSchema                  => numberValidationVocabulary ++ commonValidationVocabulary
+    case _: BooleanSchema                  => commonValidationVocabulary
+  }
+
+  def conditionalKeyword(schema: Schema): Option[String] = schema match {
+    case o: OneOfAnyOfSchema if o.isOneOf  => Some(Keywords.oneOf)
+    case o: OneOfAnyOfSchema if !o.isOneOf => Some(Keywords.anyOf)
+    case _: AllOfSchema                    => Some(Keywords.allOf)
+    case _                                 => None
+  }
 
 }

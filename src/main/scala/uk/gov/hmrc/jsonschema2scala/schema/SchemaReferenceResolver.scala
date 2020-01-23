@@ -31,7 +31,7 @@ trait SchemaReferenceResolver {
 
   def lookupJson(uri: URI): Option[(JsValue, SchemaReferenceResolver)]
 
-  def lookupSchema(uri: URI, reader: SchemaReader): Option[(Schema, SchemaReferenceResolver)]
+  def lookupSchema(uri: URI, readerOpt: Option[SchemaReader]): Option[(Schema, SchemaReferenceResolver)]
 
   def uriToPath(uri: URI): List[String]
 
@@ -179,12 +179,12 @@ final case class CachingReferenceResolver(schemaSource: SchemaSource, upstreamRe
     }
   }
 
-  override def lookupSchema(uri: URI, reader: SchemaReader): Option[(Schema, SchemaReferenceResolver)] = {
+  override def lookupSchema(uri: URI, readerOpt: Option[SchemaReader]): Option[(Schema, SchemaReferenceResolver)] = {
 
     val isFragmentOnly: Boolean = SchemaReferenceResolver.isFragmentOnly(uri)
     val (absolute, relative) = computeAbsoluteAndRelativeUriString(schemaSource.uri, uri)
 
-    def read(jsObject: JsObject, name: String): Schema = {
+    def readSchema(jsObject: JsObject, name: String, reader: SchemaReader): Schema = {
       // prevent cycles by caching a schema stub
       val stub = SchemaStub(reader(name, emptyJsObject, this), absolute)
       cache.update(absolute, stub)
@@ -198,29 +198,32 @@ final case class CachingReferenceResolver(schemaSource: SchemaSource, upstreamRe
     cache
       .get(absolute)
       .orElse {
-        if (isFragmentOnly || absolute.startsWith(rootUriString)) {
+        readerOpt
+          .flatMap { reader =>
+            if (isFragmentOnly || absolute.startsWith(rootUriString)) {
 
-          val jsonPointer: List[String] = toJsonPointer(relative)
+              val jsonPointer: List[String] = toJsonPointer(relative)
 
-          val name = if (jsonPointer.isEmpty) schemaSource.name else jsonPointer.last
+              val name = if (jsonPointer.isEmpty) schemaSource.name else jsonPointer.last
 
-          val result: Option[Schema] = resolveJsonPointer(jsonPointer, uri)(schemaSource.json)
-            .asOpt[JsValue]
-            .flatMap {
-              case jsObject: JsObject                      => Some(jsObject)
-              case jsArray: JsArray                        => Some(Json.obj("items" -> jsArray))
-              case jsBoolean: JsBoolean if jsBoolean.value => Some(Json.obj())
-              case _                                       => None
-            }
-            .map(read(_, name))
+              val result: Option[Schema] = resolveJsonPointer(jsonPointer, uri)(schemaSource.json)
+                .asOpt[JsValue]
+                .flatMap {
+                  case jsObject: JsObject                      => Some(jsObject)
+                  case jsArray: JsArray                        => Some(Json.obj("items" -> jsArray))
+                  case jsBoolean: JsBoolean if jsBoolean.value => Some(Json.obj())
+                  case _                                       => None
+                }
+                .map(readSchema(_, name, reader))
 
-          result
+              result
 
-        } else None
+            } else None
+          }
       }
       .map((_, this))
       .orElse {
-        if (isFragmentOnly) None else upstreamResolver.flatMap(_.lookupSchema(uri, reader))
+        if (isFragmentOnly) None else upstreamResolver.flatMap(_.lookupSchema(uri, readerOpt))
       }
   }
 
@@ -267,7 +270,7 @@ final case class MultiReferenceResolver(
         ))
       .orElse(upstreamResolver.flatMap(_.lookupJson(uri)))
 
-  override def lookupSchema(uri: URI, reader: SchemaReader): Option[(Schema, SchemaReferenceResolver)] =
+  override def lookupSchema(uri: URI, reader: Option[SchemaReader]): Option[(Schema, SchemaReferenceResolver)] =
     resolvers
       .foldLeft[Option[(Schema, SchemaReferenceResolver)]](None)(
         (a, r) =>

@@ -28,50 +28,56 @@ trait CodeRenderingAssertions extends CompilationAssertions {
 
   private def randomName: String = "Test" ++ String.valueOf(Random.alphanumeric.take(6).toArray)
 
-  def assertCanParseAndCompile(schemaString: String)(implicit compiler: Compiler): Unit =
+  def assertCanParseAndCompile(
+    schemaString: String)(implicit compiler: Compiler, debug: SchemaReader.DebugOptions): Unit =
     assertCanParseAndCompile(schemaString, packageName = "a.b.c", className = randomName)
 
-  def assertCanParseAndCompile(schemaSource: SchemaSource)(implicit compiler: Compiler): Unit =
+  def assertCanParseAndCompile(
+    schemaSource: SchemaSource)(implicit compiler: Compiler, debug: SchemaReader.DebugOptions): Unit =
     assertCanParseAndCompile(schemaSource, Seq.empty)
 
   def assertCanParseAndCompile(schemaSource: SchemaSource, allSchemaSources: Seq[SchemaSource])(
-    implicit compiler: Compiler): Unit = {
-    val resolver = SchemaReferenceResolver(schemaSource, allSchemaSources)
-    val definition = SchemaReader.read(schemaSource, resolver)
-    assertCanParseAndCompile(definition, packageName = "a.b.c")
+    implicit compiler: Compiler,
+    debug: SchemaReader.DebugOptions): Unit = {
+    val schemaResolver = SchemaReferenceResolver(schemaSource, allSchemaSources)
+    val definition = SchemaReader.read(schemaSource, schemaResolver, debug)
+    assertCanParseAndCompile(definition, packageName = "a.b.c", schemaResolver)
   }
 
   def assertCanParseAndCompile(schemaString: String, packageName: String, className: String)(
-    implicit compiler: Compiler): Unit = {
+    implicit compiler: Compiler,
+    debug: SchemaReader.DebugOptions): Unit = {
     val schemaJson = Json.parse(schemaString).as[JsObject]
     assertCanParseAndCompile(schemaJson, packageName, className)
   }
 
   def assertCanParseAndCompile(schemaJson: JsObject, packageName: String, className: String)(
-    implicit compiler: Compiler): Unit = {
+    implicit compiler: Compiler,
+    debug: SchemaReader.DebugOptions): Unit = {
     val options = ScalaCodeGeneratorOptions(features = Set(), packageName = packageName)
     val schemaSource = SchemaSourceJson(className, schemaJson)
-    val resolver = SchemaReferenceResolver(schemaSource, None)
-    val definition = SchemaReader.read(schemaSource, resolver)
-    val result = ScalaCodeGenerator.generateCodeFromSchema(definition, options, "")
+    val schemaResolver = SchemaReferenceResolver(schemaSource, None)
+    val definition = SchemaReader.read(schemaSource, schemaResolver, debug)
+    val result = ScalaCodeGenerator.generateCodeFromSchema(definition, options, "", schemaResolver)
     assertSuccessAndCompiles(result)
   }
 
-  def assertCanParseAndCompile(schema: Schema, packageName: String)(implicit compiler: Compiler): Unit = {
+  def assertCanParseAndCompile(schema: Schema, packageName: String, schemaResolver: SchemaReferenceResolver)(
+    implicit compiler: Compiler): Unit = {
     val options = ScalaCodeGeneratorOptions(features = Set(), packageName = packageName)
-    val result = ScalaCodeGenerator.generateCodeFromSchema(schema, options, "")
+    val result = ScalaCodeGenerator.generateCodeFromSchema(schema, options, "", schemaResolver)
     assertSuccessAndCompiles(result)
   }
 
-  def assertRenderingFails(schemaString: String): Unit = {
+  def assertRenderingFails(schemaString: String)(implicit debug: SchemaReader.DebugOptions): Unit = {
     val options = ScalaCodeGeneratorOptions(features = Set(), packageName = "a.b.c")
     val schemaJson = Json.parse(schemaString).as[JsObject]
     val name = randomName
     val schemaSource = SchemaSourceJson(name, schemaJson)
-    val resolver = SchemaReferenceResolver(schemaSource, None)
-    val definition = SchemaReader.read(schemaSource, resolver)
+    val schemaResolver = SchemaReferenceResolver(schemaSource, None)
+    val definition = SchemaReader.read(schemaSource, schemaResolver, debug)
     ScalaCodeGenerator
-      .generateCodeFromSchema(definition, options, description = "") should be leftSide
+      .generateCodeFromSchema(definition, options, description = "", schemaResolver) should be leftSide
   }
 
 }

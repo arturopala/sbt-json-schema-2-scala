@@ -24,18 +24,19 @@ import uk.gov.hmrc.jsonschema2scala.typer.{ScalaTypeNameProvider, TypeDefinition
 
 object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
 
-  val maxNumberOfArgs = 22
+  val maxNumberOfArgs = 254
 
   override type CodeGeneratorOptions = ScalaCodeGeneratorOptions
 
   override def generateCodeFromSchema(
     schema: Schema,
     options: ScalaCodeGeneratorOptions,
-    description: String): CodeGeneratorResult = {
+    description: String,
+    schemaReferenceResolver: SchemaReferenceResolver): CodeGeneratorResult = {
 
     implicit val typeNameProvider: TypeNameProvider = ScalaTypeNameProvider
 
-    buildTypeDefinitions(schema, Map.empty).flatMap {
+    buildTypeDefinitions(schema, Map.empty)(typeNameProvider, schemaReferenceResolver).flatMap {
       case (typeDef, typeResolver) =>
         val context = ScalaCodeGeneratorContext(schema, options)
 
@@ -46,7 +47,8 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
   }
 
   def buildTypeResolverFor(schema: Schema, externalTypeResolvers: Map[String, TypeResolver])(
-    implicit typeNameProvider: TypeNameProvider): TypeResolver =
+    implicit typeNameProvider: TypeNameProvider,
+    schemaResolver: SchemaReferenceResolver): TypeResolver =
     buildTypeDefinitions(schema, externalTypeResolvers).fold(
       errors =>
         throw new IllegalStateException(s"Error(s) when resolving types for ${schema.uri}: ${errors.mkString(", ")}"),
@@ -54,12 +56,13 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
     )
 
   def buildTypeDefinitions(schema: Schema, externalTypeResolvers: Map[String, TypeResolver])(
-    implicit typeNameProvider: TypeNameProvider): Either[List[String], (TypeDefinition, TypeResolver)] =
+    implicit typeNameProvider: TypeNameProvider,
+    schemaReferenceResolver: SchemaReferenceResolver): Either[List[String], (TypeDefinition, TypeResolver)] =
     TypeDefinitionsBuilder
       .buildFrom(schema)(typeNameProvider)
       .fold(
         errors => Left(errors),
-        typeDef => Right((typeDef, new ScalaTypeResolver(typeDef, buildTypeResolverFor)(typeNameProvider))))
+        typeDef => Right((typeDef, new ScalaTypeResolver(typeDef, buildTypeResolverFor, schemaReferenceResolver))))
 
   def generateCodeFromTypeDefinition(
     typeDef: TypeDefinition,
@@ -199,9 +202,8 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
                                            Seq(Param("id", "Option[String] = None"))
                                          else Seq.empty)
 
-        val interfaceList: List[String] = compileClassInterfaceList(typeDef)
-
         if (parameters.nonEmpty) {
+          val interfaceList: List[String] = compileClassInterfaceList(typeDef)
           Some(
             CaseClass(
               name = typeDef.name,
@@ -211,15 +213,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
               comment =
                 Some(s"${typeDef.schema.description.map(d => s"$d\n").getOrElse("")}Schema: ${typeDef.schema.uri}")
             ))
-        } else if (!isTopLevel)
-          Some(
-            Trait(
-              name = typeDef.name,
-              comment =
-                Some(s"${typeDef.schema.description.map(d => s"$d\n").getOrElse("")}Schema: ${typeDef.schema.uri}"),
-              supertypes = interfaceList
-            ))
-        else None
+        } else None
       }
 
     val objectCode: Option[ScalaCode] =

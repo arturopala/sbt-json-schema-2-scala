@@ -30,7 +30,7 @@ object TypeDefinitionsBuilder {
       }
       .distinct
 
-    if (types.isEmpty) Left(s"Schema ${schema.uri} does not produce any type" :: Nil)
+    if (types.isEmpty) Left(s"Schema ${schema.uri} is not a valid type definition" :: Nil)
     else if (types.size == 1) Right(types.head)
     else {
       types.find(_.name == name) match {
@@ -103,27 +103,29 @@ object TypeDefinitionsBuilder {
       .sortBy(_.name)
 
   def processObjectSchema(name: String, path: List[String], objectSchema: ObjectSchema)(
-    implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] = {
+    implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] =
+    if (objectSchema.isEmpty) Seq.empty
+    else {
 
-    val typeName = {
-      if (objectSchema.properties.exists(_.name == name)) s"_$name" else name
-    }
-
-    val templates: Seq[TypeDefinition] = processTemplates(typeName :: path, objectSchema)
-
-    val nestedTypeDefinitions: Seq[TypeDefinition] =
-      objectSchema.properties.flatMap { schema =>
-        val childTypeName = typeNameProvider.toTypeName(schema)
-        processSchema(childTypeName, typeName :: path, schema)
+      val typeName = {
+        if (objectSchema.properties.exists(_.name == name)) s"_$name" else name
       }
 
-    Seq(
-      TypeDefinition(
-        typeName,
-        path,
-        objectSchema,
-        sortByName(avoidNameCollisions(templates ++ nestedTypeDefinitions, typeName))))
-  }
+      val templates: Seq[TypeDefinition] = processTemplates(typeName :: path, objectSchema)
+
+      val nestedTypeDefinitions: Seq[TypeDefinition] =
+        objectSchema.properties.flatMap { schema =>
+          val childTypeName = typeNameProvider.toTypeName(schema)
+          processSchema(childTypeName, typeName :: path, schema)
+        }
+
+      Seq(
+        TypeDefinition(
+          typeName,
+          path,
+          objectSchema,
+          sortByName(avoidNameCollisions(templates ++ nestedTypeDefinitions, typeName))))
+    }
 
   def processOneOfAnyOfSchema(name: String, path: List[String], oneOfSchema: OneOfAnyOfSchema)(
     implicit typeNameProvider: TypeNameProvider): Seq[TypeDefinition] = {
@@ -131,11 +133,18 @@ object TypeDefinitionsBuilder {
     val nonPrimitives: Seq[Schema] = oneOfSchema.variants.filterNot(_.primitive)
     val oneOfTypeName = typeNameProvider.toTypeName(oneOfSchema)
 
-    val (nonArrays, arrays) = nonPrimitives
-      .partition { case _: ArraySchema => false; case _ => true }
+    val (arrays, nonArrays) = nonPrimitives.partition(SchemaUtils.isEffectiveArraySchema)
+
+    var pos = 0
 
     val arrayTypeDefinitions = arrays.flatMap { schema =>
-      processSchema(name, path, schema) /*++
+      val nameVariant =
+        if (nonPrimitives.size == 1) name
+        else {
+          pos = pos + 1
+          s"${name}_$pos"
+        }
+      processSchema(nameVariant, path, schema) /*++
         processInternalSchemaReference(name, path, schema)*/
     }
 
@@ -146,11 +155,14 @@ object TypeDefinitionsBuilder {
 
       case many =>
         val directSubtypes = avoidNameCollisions(
-          nonArrays
-            .flatMap { schema =>
-              processSchema(name, name :: path, schema) ++
-                processInternalSchemaReference(name, name :: path, schema)
-            },
+          nonArrays.flatMap { schema =>
+            val nameVariant = {
+              pos = pos + 1
+              s"${name}_$pos"
+            }
+            processSchema(nameVariant, name :: path, schema) /* ++
+                  processInternalSchemaReference(name, name :: path, schema)*/
+          },
           oneOfTypeName
         )
 
@@ -182,10 +194,11 @@ object TypeDefinitionsBuilder {
                   required = oneOfSchema.required,
                   custom = None)),
               isInterface = true,
-              subtypes = subtypes.map(_.schema)
+              subtypes = subtypes.map(_.schema),
+              nestedTypes = directSubtypes
             )
 
-            Seq(superType.copy(nestedTypes = directSubtypes))
+            Seq(superType)
         }
     }
 

@@ -37,6 +37,8 @@ import uk.gov.hmrc.jsonschema2scala.schema.{SchemaReader, SchemaReferenceResolve
 
 class SchemaReaderSpec extends WordSpec with Matchers with TestSchemas {
 
+  val debug: SchemaReader.DebugOptions = SchemaReader.DebugOptions()
+
   "SchemaReader" should {
     val multiResolver = SchemaReferenceResolver(allSchemas)
     allSchemas
@@ -44,7 +46,7 @@ class SchemaReaderSpec extends WordSpec with Matchers with TestSchemas {
       .foreach { schemaSource =>
         s"read ${schemaSource.name} schema" in {
           val resolver = SchemaReferenceResolver(schemaSource, Some(multiResolver))
-          val definition = SchemaReader.read(schemaSource, resolver)
+          val definition = SchemaReader.read(schemaSource, resolver, debug)
           definition.primitive shouldBe false
         }
       }

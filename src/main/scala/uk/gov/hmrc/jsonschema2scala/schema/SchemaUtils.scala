@@ -19,8 +19,16 @@ package uk.gov.hmrc.jsonschema2scala.schema
 import java.net.URI
 
 import play.api.libs.json._
+import uk.gov.hmrc.jsonschema2scala.utils.JsonUtils.{transformArrayValues, transformObjectFields, visitArrayValues, visitObjectFields}
+import uk.gov.hmrc.jsonschema2scala.utils.{JsonUtils, OptionOps}
 
 object SchemaUtils {
+
+  val isEmptySchema: PartialFunction[Schema, Boolean] = {
+    case objectSchema: ObjectSchema => objectSchema.isEmpty
+    case mapSchema: MapSchema       => mapSchema.isEmpty
+    case _                          => false
+  }
 
   def listSchemaUriToSchema(schema: Schema): Seq[(String, Schema)] =
     Seq((schema.uri, schema)) ++ (schema match {
@@ -104,7 +112,7 @@ object SchemaUtils {
             dereferenceSchema(referencedSchema, path, resolver, fieldsToRemove) match {
               case jsObject: JsObject =>
                 val retrofitted = replaceObjectSchemaPropertiesWithReferences(jsObject, uri.toString)
-                stage2.-("$ref").deepMerge(retrofitted)
+                JsonUtils.deepMerge(stage2.-("$ref"), retrofitted)
 
               case other => other
             }
@@ -149,10 +157,16 @@ object SchemaUtils {
       case ("$ref", JsString(reference)) =>
         ("$ref", JsString(if (reference.startsWith("#/")) referenceBase + reference.drop(1) else reference))
 
-      case ("properties", jsObject: JsObject) =>
-        ("properties", transformObjectFields(jsObject) {
+      case (Vocabulary.holdsJsonObject(keyword), jsObject: JsObject) =>
+        (keyword, transformObjectFields(jsObject) {
           case (name, json2: JsObject) => (name, deepInlineReferences(json2, name :: path, referenceBase))
           case (name, other)           => (name, other)
+        })
+
+      case (Vocabulary.holdsJsonArray(keyword), jsArray: JsArray) =>
+        (keyword, transformArrayValues(jsArray) {
+          case (index, json2: JsObject) => deepInlineReferences(json2, index.toString :: path, referenceBase)
+          case (_, other)               => other
         })
 
       case (name, other) => (name, other)
@@ -170,9 +184,14 @@ object SchemaUtils {
         val uri = referenceResolver.resolveUri(URI.create(reference))
         ("$ref", JsString(uri.toString))
 
-      case ("properties", jsObject: JsObject) =>
-        ("properties", transformObjectFields(jsObject) {
+      case (Vocabulary.holdsJsonObject(keyword), jsObject: JsObject) =>
+        (keyword, transformObjectFields(jsObject) {
           case (name, json2: JsObject) => (name, deepResolveReferences(json2, referenceResolver))
+        })
+
+      case (Vocabulary.holdsJsonArray(keyword), jsArray: JsArray) =>
+        (keyword, transformArrayValues(jsArray) {
+          case (_, json2: JsObject) => deepResolveReferences(json2, referenceResolver)
         })
     }
   }
@@ -183,8 +202,13 @@ object SchemaUtils {
     val referenceResolver: SchemaReferenceResolver = schemaReferenceResolverFor(json, "", referenceResolverCandidate)
 
     val resolvers = Seq(referenceResolver) ++ visitObjectFields(json) {
-      case ("properties", jsObject: JsObject) =>
+      case (Vocabulary.holdsJsonObject(_), jsObject: JsObject) =>
         visitObjectFields(jsObject) {
+          case (_, json2: JsObject) => collectSchemaReferenceResolvers(json2, referenceResolver)
+        }.distinct
+
+      case (Vocabulary.holdsJsonArray(_), jsArray: JsArray) =>
+        visitArrayValues(jsArray) {
           case (_, json2: JsObject) => collectSchemaReferenceResolvers(json2, referenceResolver)
         }.distinct
     }
@@ -204,17 +228,27 @@ object SchemaUtils {
       }
       .getOrElse(referenceResolverCandidate)
 
-  def transformObjectFields(json: JsObject)(fx: PartialFunction[(String, JsValue), (String, JsValue)]): JsObject =
-    JsObject(json.fields.map {
-      case (name, value) => if (fx.isDefinedAt((name, value))) fx((name, value)) else (name, value)
-    })
+  def isEffectiveArraySchema: Schema => Boolean = {
+    case _: ArraySchema                              => true
+    case i: InternalSchemaReference                  => isEffectiveArraySchema(i.schema)
+    case e: ExternalSchemaReference                  => isEffectiveArraySchema(e.schema)
+    case o: OneOfAnyOfSchema if o.variants.size == 1 => isEffectiveArraySchema(o.variants.head)
+    case a: AllOfSchema                              => isEffectiveArraySchema(a.aggregatedSchema)
+    case _                                           => false
+  }
 
-  def visitObjectFields[T](json: JsObject)(fx: PartialFunction[(String, JsValue), Seq[T]]): Seq[T] =
-    json.fields.flatMap { case (name, value) => if (fx.isDefinedAt((name, value))) fx((name, value)) else Seq.empty }
+  def referenceSchemaOption: Schema => Option[Schema] = {
+    case i: InternalSchemaReference => Some(i)
+    case e: ExternalSchemaReference => Some(e)
+    case _                          => None
+  }
 
-  def transformArray(json: JsArray)(fx: PartialFunction[JsValue, JsValue]): JsArray =
-    JsArray(json.value.map(value => if (fx.isDefinedAt(value)) fx(value) else value))
+  object singleReferenceSchema {
+    def unapply(maybeSchemas: Option[Seq[Schema]]): Option[Schema] =
+      OptionOps
+        .getIfSingleItem(maybeSchemas)
+        .flatMap(SchemaUtils.referenceSchemaOption)
 
-  def visitArray[T](json: JsArray)(fx: PartialFunction[JsValue, Seq[T]]): Seq[T] =
-    json.value.flatMap(value => if (fx.isDefinedAt(value)) fx(value) else Seq.empty)
+  }
+
 }

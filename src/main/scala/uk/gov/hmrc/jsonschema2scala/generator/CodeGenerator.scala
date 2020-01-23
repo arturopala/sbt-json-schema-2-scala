@@ -16,12 +16,16 @@
 
 package uk.gov.hmrc.jsonschema2scala.generator
 
-import uk.gov.hmrc.jsonschema2scala.schema.Schema
+import uk.gov.hmrc.jsonschema2scala.schema.{Schema, SchemaReferenceResolver}
 
 trait CodeGenerator {
 
   type CodeGeneratorOptions
   type CodeGeneratorResult = Either[List[String], (String, String, Seq[Code])]
 
-  def generateCodeFromSchema(schema: Schema, options: CodeGeneratorOptions, description: String): CodeGeneratorResult
+  def generateCodeFromSchema(
+    schema: Schema,
+    options: CodeGeneratorOptions,
+    description: String,
+    schemaResolver: SchemaReferenceResolver): CodeGeneratorResult
 }

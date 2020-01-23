@@ -16,16 +16,18 @@
 
 package uk.gov.hmrc.jsonschema2scala.generator.scala2
 
+import java.net.URI
+
 import uk.gov.hmrc.jsonschema2scala.generator.TypeResolver
 import uk.gov.hmrc.jsonschema2scala.schema._
-import uk.gov.hmrc.jsonschema2scala.typer.{TypeDefinition, TypeNameProvider}
+import uk.gov.hmrc.jsonschema2scala.typer.TypeDefinition
 
 import scala.collection.mutable
 
 class ScalaTypeResolver(
   typeDef: TypeDefinition,
-  buildTypeResolverFor: (Schema, Map[String, TypeResolver]) => TypeResolver)(
-  implicit schemaNameResolver: TypeNameProvider)
+  buildTypeResolverFor: (Schema, Map[String, TypeResolver]) => TypeResolver,
+  schemaReferenceResolver: SchemaReferenceResolver)
     extends TypeResolver {
 
   val schemaUriToTypePath: Map[String, List[String]] =
@@ -51,6 +53,7 @@ class ScalaTypeResolver(
     }
 
   override val any: String = "Any"
+  val anyRef: String = "AnyRef"
 
   println(s"Types resolved from ${schemaUriToTypePath.size} schema(s):")
   println(
@@ -72,10 +75,12 @@ class ScalaTypeResolver(
       case _: NullSchema    => any
 
       case objectSchema: ObjectSchema =>
-        schemaTypeNameAsSeenFrom(objectSchema, viewpoint)
-          .getOrElse(
-            throw new IllegalStateException(
-              s"Resolving type of object schema ${objectSchema.uri}, but the type definition unknown."))
+        if (objectSchema.properties.isEmpty && objectSchema.patternProperties.isEmpty) anyRef
+        else
+          schemaTypeNameAsSeenFrom(objectSchema, viewpoint)
+            .getOrElse(
+              throw new IllegalStateException(
+                s"Resolving type of object schema ${objectSchema.uri}, but the type definition unknown."))
 
       case mapSchema: MapSchema =>
         if (mapSchema.patternProperties.size == 1)
@@ -111,7 +116,7 @@ class ScalaTypeResolver(
           if (types.size == 1) types.head else "AnyVal"
         } else if (variants.forall(v => !v.primitive)) {
           schemaTypeNameAsSeenFrom(oneOfSchema, viewpoint)
-            .getOrElse("AnyRef")
+            .getOrElse(anyRef)
         } else "Any"
       }
 
@@ -126,7 +131,7 @@ class ScalaTypeResolver(
           case Some(elseSchema) =>
             val schemaType = typeOf(ite.schema, viewpoint, wrapAsOption)
             val elseSchemaType = typeOf(elseSchema, viewpoint, wrapAsOption)
-            if (schemaType == elseSchemaType) schemaType else "AnyRef"
+            if (schemaType == elseSchemaType) schemaType else anyRef
         }
 
       case internalReference: InternalSchemaReference =>
@@ -142,10 +147,13 @@ class ScalaTypeResolver(
         }
 
       case schemaStub: SchemaStub =>
-        schemaTypeNameAsSeenFrom(schemaStub.reference, viewpoint)
-          .getOrElse(
-            throw new IllegalStateException(
-              s"Resolving type of schema stub reference ${schemaStub.reference}, but the type definition unknown."))
+        val uri = URI.create(schemaStub.reference)
+        schemaReferenceResolver
+          .lookupSchema(uri, None)
+          .map(_._1)
+          .map(typeOf(_, viewpoint, wrapAsOption = false))
+          .getOrElse(throw new IllegalStateException(
+            s"Resolving type of schema stub reference ${schemaStub.reference}, but the type definition unknown."))
 
     }
 

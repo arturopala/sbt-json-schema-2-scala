@@ -22,6 +22,7 @@ import sbt.Keys._
 import sbt._
 import uk.gov.hmrc.jsonschema2scala.generator.Code
 import uk.gov.hmrc.jsonschema2scala.generator.scala2.{JsonSchema2ScalaFeature, ScalaCodeGenerator, ScalaCodeGeneratorOptions}
+import uk.gov.hmrc.jsonschema2scala.schema.SchemaReader.DebugOptions
 import uk.gov.hmrc.jsonschema2scala.schema.{Schema, SchemaReader, SchemaReferenceResolver, SchemaSourceFile}
 
 import scala.io.Source
@@ -103,19 +104,23 @@ object SbtJsonSchema2ScalaPlugin extends AutoPlugin {
       val schemaSources: Seq[SchemaSourceFile] = parseJsonSchemas(jsonSchemaFiles)
 
       val multiResolver: SchemaReferenceResolver = SchemaReferenceResolver(schemaSources)
-      val schemas: Seq[(SchemaSourceFile, Schema)] =
+      val schemas: Seq[(SchemaSourceFile, Schema, SchemaReferenceResolver)] =
         schemaSources
-          .map(s => (s, SchemaReader.read(s, SchemaReferenceResolver(s, Some(multiResolver)))))
+          .map { schemaSource =>
+            val resolver = SchemaReferenceResolver(schemaSource, Some(multiResolver))
+            val schema = SchemaReader.read(schemaSource, resolver, DebugOptions())
+            (schemaSource, schema, resolver)
+          }
 
       schemas
         .map {
-          case (schemaFile, definition) =>
+          case (schemaFile, definition, resolver) =>
             ScalaCodeGenerator
               .generateCodeFromSchema(
                 definition,
                 options,
-                s"Generated from JSON Schema ${schemaFile.file.getName}"
-              )
+                s"Generated from JSON Schema ${schemaFile.file.getName}",
+                resolver)
               .fold(
                 errors => {
                   println(errors.zipWithIndex.map { case (e, i) => s"[$i] $e" }.mkString("\n"))
