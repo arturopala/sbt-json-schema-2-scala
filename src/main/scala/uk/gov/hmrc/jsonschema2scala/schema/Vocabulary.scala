@@ -124,7 +124,8 @@ object Vocabulary {
   final val arrayVocabulary = arrayCoreVocabulary ++ arrayValidationVocabulary
   final val objectAndArrayVocabulary: Set[String] = objectVocabulary ++ arrayVocabulary
   final val oneAnyAllKeywords = Seq(oneOf, anyOf, allOf)
-  final val schemaKeyVocabulary = conditionalCoreVocabulary ++ objectCoreVocabulary ++ arrayCoreVocabulary
+  final val schemaKeyVocabulary = conditionalCoreVocabulary ++ objectCoreVocabulary ++ arrayCoreVocabulary ++
+    Seq(`type`, `$ref`)
   final val allKeywords: Set[String] = coreVocabulary ++ validationVocabulary
   final val allKeywordsButMeta: Set[String] = allKeywords.diff(metaCoreVocabulary)
   final val allKeywordsButObject: Set[String] = allKeywords.diff(objectVocabulary)

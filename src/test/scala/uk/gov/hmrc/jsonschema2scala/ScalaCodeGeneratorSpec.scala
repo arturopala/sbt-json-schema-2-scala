@@ -33,13 +33,13 @@ package uk.gov.hmrc.jsonschema2scala
  */
 
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpec}
-import uk.gov.hmrc.jsonschema2scala.schema.{SchemaReader, SchemaSource}
+import uk.gov.hmrc.jsonschema2scala.schema.{DebugOptions, SchemaSource}
 
 class ScalaCodeGeneratorSpec
     extends WordSpec with Matchers with CodeRenderingAssertions with TestSchemas with BeforeAndAfterAll {
 
   implicit val compiler: Compiler = Compiler()
-  implicit val debug: SchemaReader.DebugOptions = SchemaReader.DebugOptions(showMergedAllOfJson = false)
+  implicit val debug: DebugOptions = DebugOptions(showMergedAllOfJson = false)
 
   override def afterAll(): Unit =
     compiler.cleanup()

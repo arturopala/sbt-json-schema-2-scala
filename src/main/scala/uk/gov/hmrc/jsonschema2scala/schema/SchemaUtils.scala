@@ -24,11 +24,23 @@ import uk.gov.hmrc.jsonschema2scala.utils.{JsonUtils, OptionOps}
 
 object SchemaUtils {
 
+  def removeKeysFromSchema(schemaJson: JsObject, keysToRemove: Set[String]): JsObject =
+    JsObject(schemaJson.fields.filterNot(f => keysToRemove.contains(f._1)))
+
   val isEmptySchema: PartialFunction[Schema, Boolean] = {
     case objectSchema: ObjectSchema => objectSchema.isEmpty
     case mapSchema: MapSchema       => mapSchema.isEmpty
     case _                          => false
   }
+
+  def checkKeyExistsAndNonEmpty(schemaJson: JsObject, key: String): Boolean =
+    (schemaJson \ key)
+      .asOpt[JsValue]
+      .exists {
+        case jsObject: JsObject => jsObject.keys.nonEmpty
+        case jsArray: JsArray   => jsArray.value.nonEmpty
+        case _                  => true
+      }
 
   def listSchemaUriToSchema(schema: Schema): Seq[(String, Schema)] =
     Seq((schema.uri, schema)) ++ (schema match {
@@ -60,7 +72,7 @@ object SchemaUtils {
         referenceResolver.lookupJson(uri).flatMap {
           case (referencedSchema: JsObject, resolver) =>
             val dereferenced = dereferenceOneLevelOfSchema(referencedSchema, path, resolver)
-            val retrofitted = replaceSchemaPropertiesWithReferencesUsingBase(dereferenced, uri.toString)
+            val retrofitted = replacePropertiesSchemaWithReferenceUsingBase(dereferenced, uri.toString)
             Some(JsonUtils.deepMerge(schemaJson.-("$ref"), retrofitted).as[JsObject])
 
           case _ => None
@@ -122,7 +134,7 @@ object SchemaUtils {
     }
   }
 
-  def replaceSchemaPropertiesWithReferencesUsingBase(schemaJson: JsObject, baseReference: String): JsObject =
+  def replacePropertiesSchemaWithReferenceUsingBase(schemaJson: JsObject, baseReference: String): JsObject =
     JsonUtils.transformObjectFields(schemaJson) {
       case (key, jsObject: JsObject) if key == "properties" || key == "patternProperties" =>
         (key, JsonUtils.transformObjectFields(jsObject) {
@@ -132,7 +144,7 @@ object SchemaUtils {
         })
     }
 
-  def replaceSchemaPropertiesWithReferencesUsingMap(
+  def replacePropertiesSchemaWithReferenceUsingMap(
     schemaJson: JsObject,
     fieldReferenceMap: Map[String, String]): JsObject =
     JsonUtils.transformObjectFields(schemaJson) {

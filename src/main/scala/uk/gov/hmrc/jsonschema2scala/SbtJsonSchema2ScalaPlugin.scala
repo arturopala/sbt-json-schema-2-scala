@@ -22,7 +22,7 @@ import sbt.Keys._
 import sbt._
 import uk.gov.hmrc.jsonschema2scala.generator.Code
 import uk.gov.hmrc.jsonschema2scala.generator.scala2.{JsonSchema2ScalaFeature, ScalaCodeGenerator, ScalaCodeGeneratorOptions}
-import uk.gov.hmrc.jsonschema2scala.schema.SchemaReader.DebugOptions
+import uk.gov.hmrc.jsonschema2scala.schema.DebugOptions
 import uk.gov.hmrc.jsonschema2scala.schema.{Schema, SchemaReader, SchemaReferenceResolver, SchemaSourceFile}
 
 import scala.io.Source

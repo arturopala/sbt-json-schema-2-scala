@@ -118,7 +118,7 @@ object SchemaReader {
           resolverAndPath(name, currentPath, json, currentReferenceResolver, id)
 
         if (debug.enabled && debug.traceReadingProgress) {
-          println(s"> ${debug.incIndent}${SchemaReferenceResolver.pathToReference(path)}")
+          println(s"> ${debug.incIndent(".")}${SchemaReferenceResolver.pathToReference(path)}")
         }
 
         val description: Option[String] = externalDescription.orElse(attemptReadDescription(json))
@@ -166,7 +166,7 @@ object SchemaReader {
           }
 
         if (debug.enabled && debug.traceReadingProgress) {
-          println(s"= ${debug.decIndent}${schema.info}")
+          println(s"< ${debug.decIndent("-")}${schema.info}")
         }
 
         schema
@@ -352,29 +352,40 @@ object SchemaReader {
     val (required, alternatives) = readRequired(p.json)
     val p2 = p.copy(requiredFields = required)
 
-    val propertiesOpt: Option[Seq[Schema]] =
-      attemptReadProperties(p2).flatMap(emptyAsNone)
-
-    val patternPropertiesOpt: Option[Seq[Schema]] =
-      attemptReadPatternProperties(p2).flatMap(emptyAsNone)
+    val hasProperties = SchemaUtils.checkKeyExistsAndNonEmpty(p2.json, "properties")
+    val hasPatternProperties = SchemaUtils.checkKeyExistsAndNonEmpty(p2.json, "patternProperties")
 
     val extras: Map[String, Seq[JsObject]] =
       readSchemaFields(p2, Set(oneOf, anyOf, allOf, "additionalProperties"), Vocabulary.schemaKeyVocabulary)
 
     val schema = if (extras.nonEmpty) {
-      if (propertiesOpt.isEmpty && patternPropertiesOpt.isEmpty || extras.size == 1) {
+      if (!hasProperties && !hasPatternProperties && extras.size == 1) {
         extras.head match {
           case ("additionalProperties", hasSingleItem(json)) =>
-            readSchema(p2.copy(json = json, path = "additionalProperties" :: p.path))
+            val s = readSchema(p2.copy(json = json, path = "additionalProperties" :: p.path))
+            s.withDefinitions(s.definitions ++ p2.definitions)
+
+          case (name, hasSingleItem(json)) =>
+            val s = readSchema(p2.copy(json = json, path = "0" :: name :: p.path))
+            s.withDefinitions(s.definitions ++ p2.definitions)
+
           case _ =>
             readObjectSchemaWithExtras(p2, extras)
         }
       } else
         readObjectSchemaWithExtras(p2, extras)
     } else {
-      if (propertiesOpt.isEmpty && patternPropertiesOpt.nonEmpty)
+
+      val patternPropertiesOpt: Option[Seq[Schema]] =
+        attemptReadPatternProperties(p2).flatMap(emptyAsNone)
+
+      if (!hasProperties && hasPatternProperties) {
         MapSchema(p2.a, patternPropertiesOpt.get, required, alternatives)
-      else {
+      } else {
+
+        val propertiesOpt: Option[Seq[Schema]] =
+          attemptReadProperties(p2).flatMap(emptyAsNone)
+
         ObjectSchema(
           attributes = p2.a,
           properties = propertiesOpt.getOrElse(Seq.empty),
@@ -549,7 +560,7 @@ object SchemaReader {
       .asOpt[JsObject]
       .map { properties =>
         if (debug.enabled && debug.traceReadingProgress) {
-          println(s"D ${debug.curIndent(" ")}${properties.fields.map(_._1).distinct.mkString(",")}")
+          println(s"D ${debug.curIndent("&")}${properties.fields.map(_._1).distinct.mkString(",")}")
         }
         properties.fields
           .map(_._1)
@@ -795,7 +806,7 @@ object SchemaReader {
           }
 
           val (mergedJson, definitions, resolver) =
-            mergePartials(p.copy(path = allOf :: p.path), arrayValues.collect {
+            mergePartialSchemas(p.copy(path = allOf :: p.path), arrayValues.collect {
               case jsObject: JsObject => jsObject
             })
 
@@ -901,7 +912,7 @@ object SchemaReader {
       .get("additionalProperties")
       .flatMap {
         case hasSingleItem(additional) =>
-          Some(preparePartialToMerge(p.copy(json = additional, path = "additionalProperties" :: p.path)))
+          Some(preparePartialSchemaToMerge(p.copy(json = additional, path = "additionalProperties" :: p.path)))
         case _ =>
           None
       }
@@ -913,7 +924,7 @@ object SchemaReader {
     val (stage1Json, stage1Definitions, stage1Resolver) = extras
       .get(allOf)
       .map { partials =>
-        val (aggregatedJson, definitions, resolver) = mergePartials(p.copy(path = allOf :: p.path), partials)
+        val (aggregatedJson, definitions, resolver) = mergePartialSchemas(p.copy(path = allOf :: p.path), partials)
         val mergedJson = JsonUtils.deepMerge(stage0Json, aggregatedJson).as[JsObject]
         (mergedJson, definitions, resolver)
       }
@@ -922,28 +933,21 @@ object SchemaReader {
     val (stage2Json, stage2Definitions) = (extras.get(oneOf), extras.get(anyOf)) match {
       case (None, None) => (stage1Json, Seq.empty)
       case (Some(variants), None) =>
-        integrateBaseIntoVariants(p.copy(json = stage1Json), oneOf, variants)
+        copyAndMergeBaseIntoVariantSchemas(p.copy(json = stage1Json), oneOf, variants)
       case (None, Some(variants)) =>
-        integrateBaseIntoVariants(p.copy(json = stage1Json), anyOf, variants)
+        copyAndMergeBaseIntoVariantSchemas(p.copy(json = stage1Json), anyOf, variants)
       case (Some(variants1), Some(variants2)) =>
-        ???
+        ??? //FIXME
     }
 
-    val schema = readSchema(
-      p.name,
-      p.path,
-      stage2Json,
-      p.description,
-      p.requiredFields,
-      SchemaReferenceResolver(Seq(stage0Resolver, stage1Resolver)),
-      p.processDefinitions,
-      p.debug)
+    val schema: Schema = readSchema(
+      p.copy(json = stage2Json, referenceResolver = SchemaReferenceResolver(Seq(stage0Resolver, stage1Resolver))))
 
     schema.withDefinitions(
       p.definitions ++ stage0Definitions ++ stage1Definitions ++ stage2Definitions ++ schema.attributes.definitions)
   }
 
-  def integrateBaseIntoVariants(
+  def copyAndMergeBaseIntoVariantSchemas(
     p: Parameters,
     conditionalKeyword: String,
     variants: Seq[JsObject]): (JsObject, Seq[Schema]) = {
@@ -953,51 +957,49 @@ object SchemaReader {
     val relocatingJson = JsonUtils.filterObjectFields(p.json)(Vocabulary.objectVocabulary.contains)
 
     val (relocatingPrunedJson, promotedToDefinitions) =
-      replacePropertiesWithReferences(p.copy(json = relocatingJson))
+      replacePropertiesSchemaWithReferenceAndCollectDefinitions(p.copy(json = relocatingJson))
 
     val modifiedJson = preservedJson + (conditionalKeyword -> JsArray(
       variants.map(JsonUtils.deepMerge(relocatingPrunedJson, _))))
 
     if (p.debug.enabled && p.debug.traceReadingProgress) {
-      println(s"V ${p.debug.curIndent(" ")}${SchemaReferenceResolver.pathToReference(p.path)}")
+      println(s"C ${p.debug.curIndent("=")}${SchemaReferenceResolver.pathToReference(p.path)}")
     }
 
     if (p.debug.showCompiledObjectJson) {
       p.debug
         .show(
-          s"object + $conditionalKeyword: merged json at " + SchemaReferenceResolver.pathToReference(p.path),
+          s"object + $conditionalKeyword: combined json at " + SchemaReferenceResolver.pathToReference(p.path),
           Json.prettyPrint(modifiedJson))
     }
 
     (modifiedJson, promotedToDefinitions)
   }
 
-  def mergePartials(p: Parameters, partials: Seq[JsObject]): (JsObject, Seq[Schema], SchemaReferenceResolver) = {
+  def mergePartialSchemas(p: Parameters, partials: Seq[JsObject]): (JsObject, Seq[Schema], SchemaReferenceResolver) = {
 
     val (aggregatedJson, definitions, resolvers) = partials.zipWithIndex
       .map {
         case (partialJson, index) =>
           val partialPath = index.toString :: p.path
-          preparePartialToMerge(p.copy(json = partialJson, path = partialPath))
+          preparePartialSchemaToMerge(p.copy(json = partialJson, path = partialPath))
       }
       .reduce { (l, r) =>
         (JsonUtils.deepMerge(l._1, r._1).as[JsObject], l._2 ++ r._2, l._3 ++ r._3)
       }
 
     if (p.debug.enabled && p.debug.traceReadingProgress) {
-      println(s"M ${p.debug.curIndent(" ")}${SchemaReferenceResolver.pathToReference(p.path)}")
+      println(s"M ${p.debug.curIndent("=")}${SchemaReferenceResolver.pathToReference(p.path)}")
     }
 
     (aggregatedJson, definitions, SchemaReferenceResolver(resolvers))
   }
 
-  def preparePartialToMerge(p: Parameters): (JsObject, Seq[Schema], Seq[SchemaReferenceResolver]) = {
+  def preparePartialSchemaToMerge(p: Parameters): (JsObject, Seq[Schema], Seq[SchemaReferenceResolver]) = {
     val json = SchemaUtils.deepResolveReferences(p.json, p.referenceResolver)
 
-    val (pruned, promotedToDefinitions) = replacePropertiesWithReferences(p.copy(json = json))
-
-    val filtered = JsObject(pruned.fields.filterNot(f => keywordsToRemoveWhenMergingSchema.contains(f._1)))
-
+    val (pruned, promotedToDefinitions) = replacePropertiesSchemaWithReferenceAndCollectDefinitions(p.copy(json = json))
+    val filtered = SchemaUtils.removeKeysFromSchema(pruned, keywordsToRemoveWhenMergingSchema)
     val dereferenced = SchemaUtils.dereferenceOneLevelOfSchema(filtered, p.path, p.referenceResolver)
 
     val resolvers: Seq[SchemaReferenceResolver] =
@@ -1006,7 +1008,7 @@ object SchemaReader {
     (dereferenced, promotedToDefinitions, resolvers)
   }
 
-  def replacePropertiesWithReferences(p: Parameters): (JsObject, Seq[Schema]) = {
+  def replacePropertiesSchemaWithReferenceAndCollectDefinitions(p: Parameters): (JsObject, Seq[Schema]) = {
     val promotedToDefinitions = JsonUtils.visitObjectFields(p.json) {
       case (key, jsObject: JsObject) if key == "properties" || key == "patternProperties" =>
         JsonUtils.visitObjectFields(jsObject) {
@@ -1025,47 +1027,13 @@ object SchemaReader {
     }
     val definitionsReferenceMap: Map[String, String] = promotedToDefinitions.groupBy(_.name).mapValues(_.head.uri)
     val retrofittedJson =
-      SchemaUtils.replaceSchemaPropertiesWithReferencesUsingMap(p.json, definitionsReferenceMap)
+      SchemaUtils.replacePropertiesSchemaWithReferenceUsingMap(p.json, definitionsReferenceMap)
 
     if (p.debug.enabled && p.debug.traceReadingProgress && definitionsReferenceMap.nonEmpty) {
-      val indent = p.debug.curIndent(" ")
-      println(s"+ $indent${definitionsReferenceMap.values.mkString(s"\n  $indent")}")
+      val indent = p.debug.curIndent("+")
+      println(s"E $indent${definitionsReferenceMap.map { case (k, v) => s"$k@$v" }.mkString(s"\n  $indent")}")
     }
 
     (retrofittedJson, promotedToDefinitions)
-  }
-
-  case class DebugOptions(
-    enabled: Boolean = false,
-    traceReadingProgress: Boolean = false,
-    showMergedAllOfJson: Boolean = false,
-    showCompiledObjectJson: Boolean = false) {
-
-    val separator = "-" * 66
-
-    def show(header: String, content: String): Unit =
-      if (enabled) {
-        System.out.println("---DEBUG-START" + separator)
-        System.out.println(header)
-        System.out.println(content)
-        System.out.println("---DEBUG-END--" + separator)
-        System.out.println()
-      }
-
-    private var indent = 0
-
-    def incIndent: String = {
-      val i = indent
-      indent = indent + 1
-      "." * i
-    }
-
-    def decIndent: String = {
-      indent = indent - 1
-      "." * indent
-    }
-
-    def curIndent(s: String): String =
-      s * indent
   }
 }

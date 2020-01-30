@@ -19,7 +19,7 @@ package uk.gov.hmrc.jsonschema2scala
 import org.scalatest.{Assertions, Matchers}
 import play.api.libs.json.{JsObject, Json}
 import uk.gov.hmrc.jsonschema2scala.generator.scala2.{ScalaCodeGenerator, ScalaCodeGeneratorOptions}
-import uk.gov.hmrc.jsonschema2scala.schema.{Schema, SchemaReader, SchemaReferenceResolver, SchemaSource, SchemaSourceJson}
+import uk.gov.hmrc.jsonschema2scala.schema.{DebugOptions, Schema, SchemaReader, SchemaReferenceResolver, SchemaSource, SchemaSourceJson}
 
 import scala.util.Random
 
@@ -28,17 +28,15 @@ trait CodeRenderingAssertions extends CompilationAssertions {
 
   private def randomName: String = "Test" ++ String.valueOf(Random.alphanumeric.take(6).toArray)
 
-  def assertCanParseAndCompile(
-    schemaString: String)(implicit compiler: Compiler, debug: SchemaReader.DebugOptions): Unit =
+  def assertCanParseAndCompile(schemaString: String)(implicit compiler: Compiler, debug: DebugOptions): Unit =
     assertCanParseAndCompile(schemaString, packageName = "a.b.c", className = randomName)
 
-  def assertCanParseAndCompile(
-    schemaSource: SchemaSource)(implicit compiler: Compiler, debug: SchemaReader.DebugOptions): Unit =
+  def assertCanParseAndCompile(schemaSource: SchemaSource)(implicit compiler: Compiler, debug: DebugOptions): Unit =
     assertCanParseAndCompile(schemaSource, Seq.empty)
 
   def assertCanParseAndCompile(schemaSource: SchemaSource, allSchemaSources: Seq[SchemaSource])(
     implicit compiler: Compiler,
-    debug: SchemaReader.DebugOptions): Unit = {
+    debug: DebugOptions): Unit = {
     val schemaResolver = SchemaReferenceResolver(schemaSource, allSchemaSources)
     val definition = SchemaReader.read(schemaSource, schemaResolver, debug)
     assertCanParseAndCompile(definition, packageName = "a.b.c", schemaResolver)
@@ -46,14 +44,14 @@ trait CodeRenderingAssertions extends CompilationAssertions {
 
   def assertCanParseAndCompile(schemaString: String, packageName: String, className: String)(
     implicit compiler: Compiler,
-    debug: SchemaReader.DebugOptions): Unit = {
+    debug: DebugOptions): Unit = {
     val schemaJson = Json.parse(schemaString).as[JsObject]
     assertCanParseAndCompile(schemaJson, packageName, className)
   }
 
   def assertCanParseAndCompile(schemaJson: JsObject, packageName: String, className: String)(
     implicit compiler: Compiler,
-    debug: SchemaReader.DebugOptions): Unit = {
+    debug: DebugOptions): Unit = {
     val options = ScalaCodeGeneratorOptions(features = Set(), packageName = packageName)
     val schemaSource = SchemaSourceJson(className, schemaJson)
     val schemaResolver = SchemaReferenceResolver(schemaSource, None)
@@ -69,7 +67,7 @@ trait CodeRenderingAssertions extends CompilationAssertions {
     assertSuccessAndCompiles(result)
   }
 
-  def assertRenderingFails(schemaString: String)(implicit debug: SchemaReader.DebugOptions): Unit = {
+  def assertRenderingFails(schemaString: String)(implicit debug: DebugOptions): Unit = {
     val options = ScalaCodeGeneratorOptions(features = Set(), packageName = "a.b.c")
     val schemaJson = Json.parse(schemaString).as[JsObject]
     val name = randomName

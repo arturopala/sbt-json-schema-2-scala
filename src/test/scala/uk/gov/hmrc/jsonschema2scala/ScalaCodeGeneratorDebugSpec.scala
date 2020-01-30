@@ -33,15 +33,15 @@ package uk.gov.hmrc.jsonschema2scala
  */
 
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpec}
-import uk.gov.hmrc.jsonschema2scala.schema.{SchemaReader, SchemaSource}
+import uk.gov.hmrc.jsonschema2scala.schema.{DebugOptions, SchemaSource}
 
 class ScalaCodeGeneratorDebugSpec
     extends WordSpec with Matchers with CodeRenderingAssertions with TestSchemas with BeforeAndAfterAll {
 
   implicit val compiler: Compiler = Compiler()
-  implicit val debug: SchemaReader.DebugOptions =
-    SchemaReader.DebugOptions(
-      enabled = false,
+  implicit val debug: DebugOptions =
+    DebugOptions(
+      enabled = true,
       traceReadingProgress = true,
       showMergedAllOfJson = false,
       showCompiledObjectJson = false)
@@ -49,7 +49,7 @@ class ScalaCodeGeneratorDebugSpec
   override def afterAll(): Unit =
     compiler.cleanup()
 
-  val schemaToDebug: Set[String] = Set("swagger-2.0.json")
+  val schemaToDebug: Set[String] = Set("template.json")
 
   "Generate from selected schemas" should {
     allSchemas

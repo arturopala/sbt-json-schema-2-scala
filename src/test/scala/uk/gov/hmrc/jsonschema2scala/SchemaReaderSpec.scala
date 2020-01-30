@@ -33,11 +33,11 @@ package uk.gov.hmrc.jsonschema2scala
  */
 
 import org.scalatest.{Matchers, WordSpec}
-import uk.gov.hmrc.jsonschema2scala.schema.{SchemaReader, SchemaReferenceResolver}
+import uk.gov.hmrc.jsonschema2scala.schema.{DebugOptions, SchemaReader, SchemaReferenceResolver}
 
 class SchemaReaderSpec extends WordSpec with Matchers with TestSchemas {
 
-  val debug: SchemaReader.DebugOptions = SchemaReader.DebugOptions()
+  val debug: DebugOptions = DebugOptions()
 
   "SchemaReader" should {
     val multiResolver = SchemaReferenceResolver(allSchemas)
