@@ -44,6 +44,170 @@ object SchemaUtils {
       case _                        => Seq.empty
     })
 
+  /**
+    * Pushes references, if any, one level down.
+    * Returns a schema with references replaced by schema
+    * with in turn its properties converted to references.
+    */
+  def dereferenceOneLevelOfSchema(
+    schemaJson: JsObject,
+    path: List[String],
+    referenceResolver: SchemaReferenceResolver): JsObject =
+    (schemaJson \ "$ref")
+      .asOpt[String]
+      .flatMap { reference =>
+        val uri: URI = referenceResolver.resolveUri(URI.create(reference))
+        referenceResolver.lookupJson(uri).flatMap {
+          case (referencedSchema: JsObject, resolver) =>
+            val dereferenced = dereferenceOneLevelOfSchema(referencedSchema, path, resolver)
+            val retrofitted = replaceSchemaPropertiesWithReferencesUsingBase(dereferenced, uri.toString)
+            Some(JsonUtils.deepMerge(schemaJson.-("$ref"), retrofitted).as[JsObject])
+
+          case _ => None
+        }
+      }
+      .getOrElse(schemaJson)
+
+  /**
+    * Rebase all nested references to the current base.
+    */
+  def deepInlineReferences(schemaJson: JsObject, path: List[String], referenceBaseCandidate: String): JsObject = {
+    val referenceBase: String = SchemaReader.attemptReadId(schemaJson) match {
+      case Some(_) =>
+        SchemaReferenceResolver.pathToReference(path)
+      case _ => referenceBaseCandidate
+    }
+
+    transformObjectFields(schemaJson) {
+      case ("$ref", JsString(reference)) =>
+        ("$ref", JsString(if (reference.startsWith("#/")) referenceBase + reference.drop(1) else reference))
+
+      case (Vocabulary.holdsJsonObject(keyword), jsObject: JsObject) =>
+        (keyword, transformObjectFields(jsObject) {
+          case (name, json2: JsObject) => (name, deepInlineReferences(json2, name :: path, referenceBase))
+          case (name, other)           => (name, other)
+        })
+
+      case (Vocabulary.holdsJsonArray(keyword), jsArray: JsArray) =>
+        (keyword, transformArrayValues(jsArray) {
+          case (index, json2: JsObject) => deepInlineReferences(json2, index.toString :: path, referenceBase)
+          case (_, other)               => other
+        })
+
+      case (name, other) => (name, other)
+    }
+  }
+
+  /**
+    * Resolve all nested references to be absolute URIs
+    */
+  def deepResolveReferences(schemaJson: JsObject, referenceResolverCandidate: SchemaReferenceResolver): JsObject = {
+    val referenceResolver: SchemaReferenceResolver =
+      schemaReferenceResolverFor(schemaJson, "", referenceResolverCandidate)
+
+    transformObjectFields(schemaJson) {
+      case ("$ref", JsString(reference)) =>
+        val uri = referenceResolver.resolveUri(URI.create(reference))
+        ("$ref", JsString(uri.toString))
+
+      case (Vocabulary.holdsJsonObject(keyword), jsObject: JsObject) =>
+        (keyword, transformObjectFields(jsObject) {
+          case (name, json2: JsObject) => (name, deepResolveReferences(json2, referenceResolver))
+        })
+
+      case (Vocabulary.holdsJsonArray(keyword), jsArray: JsArray) =>
+        (keyword, transformArrayValues(jsArray) {
+          case (_, json2: JsObject) => deepResolveReferences(json2, referenceResolver)
+        })
+    }
+  }
+
+  def replaceSchemaPropertiesWithReferencesUsingBase(schemaJson: JsObject, baseReference: String): JsObject =
+    JsonUtils.transformObjectFields(schemaJson) {
+      case (key, jsObject: JsObject) if key == "properties" || key == "patternProperties" =>
+        (key, JsonUtils.transformObjectFields(jsObject) {
+          case (name, _: JsObject) =>
+            val uri = s"$baseReference/$key/$name"
+            (name, JsObject(Map("$ref" -> JsString(uri))))
+        })
+    }
+
+  def replaceSchemaPropertiesWithReferencesUsingMap(
+    schemaJson: JsObject,
+    fieldReferenceMap: Map[String, String]): JsObject =
+    JsonUtils.transformObjectFields(schemaJson) {
+      case (key, jsObject: JsObject) if key == "properties" || key == "patternProperties" =>
+        (key, JsonUtils.transformObjectFields(jsObject) {
+          case (name, _: JsObject) if fieldReferenceMap.contains(name) =>
+            val uri = fieldReferenceMap(name)
+            (name, JsObject(Map("$ref" -> JsString(uri))))
+        })
+    }
+
+  def collectSchemaReferenceResolvers(
+    json: JsObject,
+    referenceResolverCandidate: SchemaReferenceResolver): Seq[SchemaReferenceResolver] = {
+    val referenceResolver: SchemaReferenceResolver = schemaReferenceResolverFor(json, "", referenceResolverCandidate)
+
+    val resolvers = Seq(referenceResolver) ++ visitObjectFields(json) {
+      case (Vocabulary.holdsJsonObject(_), jsObject: JsObject) =>
+        visitObjectFields(jsObject) {
+          case (_, json2: JsObject) => collectSchemaReferenceResolvers(json2, referenceResolver)
+        }.distinct
+
+      case (Vocabulary.holdsJsonArray(_), jsArray: JsArray) =>
+        visitArrayValues(jsArray) {
+          case (_, json2: JsObject) => collectSchemaReferenceResolvers(json2, referenceResolver)
+        }.distinct
+    }
+
+    resolvers.distinct
+  }
+
+  def schemaReferenceResolverFor(
+    json: JsObject,
+    schemaName: String,
+    referenceResolverCandidate: SchemaReferenceResolver): SchemaReferenceResolver =
+    SchemaReader
+      .attemptReadId(json)
+      .map { uri =>
+        val uri2 = if (uri.isAbsolute) uri else referenceResolverCandidate.resolveUri(uri)
+        SchemaReferenceResolver(uri2, schemaName, json, Some(referenceResolverCandidate))
+      }
+      .getOrElse(referenceResolverCandidate)
+
+  val isNonPrimitive: Schema => Boolean = {
+    case _: ObjectSchema     => true
+    case _: MapSchema        => true
+    case _: ArraySchema      => true
+    case s: OneOfAnyOfSchema => !s.primitive
+    case s: AllOfSchema      => !s.primitive
+    case _                   => false
+  }
+
+  def isEffectiveArraySchema: Schema => Boolean = {
+    case _: ArraySchema                              => true
+    case i: InternalSchemaReference                  => isEffectiveArraySchema(i.schema)
+    case e: ExternalSchemaReference                  => isEffectiveArraySchema(e.schema)
+    case o: OneOfAnyOfSchema if o.variants.size == 1 => isEffectiveArraySchema(o.variants.head)
+    case a: AllOfSchema                              => isEffectiveArraySchema(a.aggregatedSchema)
+    case _                                           => false
+  }
+
+  def referenceSchemaOption: Schema => Option[Schema] = {
+    case i: InternalSchemaReference => Some(i)
+    case e: ExternalSchemaReference => Some(e)
+    case _                          => None
+  }
+
+  object singleReferenceSchema {
+    def unapply(maybeSchemas: Option[Seq[Schema]]): Option[Schema] =
+      OptionOps
+        .getIfSingleItem(maybeSchemas)
+        .flatMap(SchemaUtils.referenceSchemaOption)
+
+  }
+
   def copy(schema: Schema, name: String): Schema = {
     val newAttributes = schema.attributes.copy(name = name)
     copyAttributes(schema, newAttributes)
@@ -88,167 +252,5 @@ object SchemaUtils {
       case s: SchemaStub =>
         s.copy(attributes = newAttributes)
     }
-
-  /**
-    * Pushes references, if any, one level down.
-    * Returns a schema with a direct reference replaced by referenced schema
-    * with its properties converted to be a referenced schemas.
-    */
-  def dereferenceSchema(
-    json: JsObject,
-    path: List[String],
-    referenceResolver: SchemaReferenceResolver,
-    fieldsToRemove: Set[String]): JsValue = {
-
-    val stage1 = deepResolveReferences(json, referenceResolver)
-    val stage2 = JsObject(stage1.fields.filterNot(f => fieldsToRemove.contains(f._1)))
-
-    (stage2 \ "$ref")
-      .asOpt[String]
-      .flatMap { reference =>
-        val uri: URI = referenceResolver.resolveUri(URI.create(reference))
-        referenceResolver.lookupJson(uri).map {
-          case (referencedSchema: JsObject, resolver) =>
-            dereferenceSchema(referencedSchema, path, resolver, fieldsToRemove) match {
-              case jsObject: JsObject =>
-                val retrofitted = replaceObjectSchemaPropertiesWithReferences(jsObject, uri.toString)
-                JsonUtils.deepMerge(stage2.-("$ref"), retrofitted)
-
-              case other => other
-            }
-
-          case (other, _) => other
-        }
-      }
-      .getOrElse(stage2)
-  }
-
-  /**
-    * Convert each property schema to a reference
-    */
-  def replaceObjectSchemaPropertiesWithReferences(json: JsObject, baseReference: String): JsObject =
-    (json \ "properties").asOpt[JsObject] match {
-      case Some(properties) =>
-        val newProperties = JsObject(properties.fields.map {
-          case (name, value) =>
-            (name, value match {
-              case _: JsObject =>
-                Json.obj("$ref" -> s"$baseReference/properties/$name")
-
-              case other => other
-            })
-        })
-        json.-("properties").+("properties" -> newProperties)
-
-      case None => json
-    }
-
-  /**
-    * Rebase all nested references to the current base.
-    */
-  def deepInlineReferences(json: JsObject, path: List[String], referenceBaseCandidate: String): JsObject = {
-    val referenceBase: String = SchemaReader.attemptReadId(json) match {
-      case Some(_) =>
-        SchemaReferenceResolver.pathToReference(path)
-      case _ => referenceBaseCandidate
-    }
-
-    transformObjectFields(json) {
-      case ("$ref", JsString(reference)) =>
-        ("$ref", JsString(if (reference.startsWith("#/")) referenceBase + reference.drop(1) else reference))
-
-      case (Vocabulary.holdsJsonObject(keyword), jsObject: JsObject) =>
-        (keyword, transformObjectFields(jsObject) {
-          case (name, json2: JsObject) => (name, deepInlineReferences(json2, name :: path, referenceBase))
-          case (name, other)           => (name, other)
-        })
-
-      case (Vocabulary.holdsJsonArray(keyword), jsArray: JsArray) =>
-        (keyword, transformArrayValues(jsArray) {
-          case (index, json2: JsObject) => deepInlineReferences(json2, index.toString :: path, referenceBase)
-          case (_, other)               => other
-        })
-
-      case (name, other) => (name, other)
-    }
-  }
-
-  /**
-    * Resolve all nested references to be absolute URIs
-    */
-  def deepResolveReferences(json: JsObject, referenceResolverCandidate: SchemaReferenceResolver): JsObject = {
-    val referenceResolver: SchemaReferenceResolver = schemaReferenceResolverFor(json, "", referenceResolverCandidate)
-
-    transformObjectFields(json) {
-      case ("$ref", JsString(reference)) =>
-        val uri = referenceResolver.resolveUri(URI.create(reference))
-        ("$ref", JsString(uri.toString))
-
-      case (Vocabulary.holdsJsonObject(keyword), jsObject: JsObject) =>
-        (keyword, transformObjectFields(jsObject) {
-          case (name, json2: JsObject) => (name, deepResolveReferences(json2, referenceResolver))
-        })
-
-      case (Vocabulary.holdsJsonArray(keyword), jsArray: JsArray) =>
-        (keyword, transformArrayValues(jsArray) {
-          case (_, json2: JsObject) => deepResolveReferences(json2, referenceResolver)
-        })
-    }
-  }
-
-  def collectSchemaReferenceResolvers(
-    json: JsObject,
-    referenceResolverCandidate: SchemaReferenceResolver): Seq[SchemaReferenceResolver] = {
-    val referenceResolver: SchemaReferenceResolver = schemaReferenceResolverFor(json, "", referenceResolverCandidate)
-
-    val resolvers = Seq(referenceResolver) ++ visitObjectFields(json) {
-      case (Vocabulary.holdsJsonObject(_), jsObject: JsObject) =>
-        visitObjectFields(jsObject) {
-          case (_, json2: JsObject) => collectSchemaReferenceResolvers(json2, referenceResolver)
-        }.distinct
-
-      case (Vocabulary.holdsJsonArray(_), jsArray: JsArray) =>
-        visitArrayValues(jsArray) {
-          case (_, json2: JsObject) => collectSchemaReferenceResolvers(json2, referenceResolver)
-        }.distinct
-    }
-
-    resolvers.distinct
-  }
-
-  def schemaReferenceResolverFor(
-    json: JsObject,
-    schemaName: String,
-    referenceResolverCandidate: SchemaReferenceResolver): SchemaReferenceResolver =
-    SchemaReader
-      .attemptReadId(json)
-      .map { uri =>
-        val uri2 = if (uri.isAbsolute) uri else referenceResolverCandidate.resolveUri(uri)
-        SchemaReferenceResolver(uri2, schemaName, json, Some(referenceResolverCandidate))
-      }
-      .getOrElse(referenceResolverCandidate)
-
-  def isEffectiveArraySchema: Schema => Boolean = {
-    case _: ArraySchema                              => true
-    case i: InternalSchemaReference                  => isEffectiveArraySchema(i.schema)
-    case e: ExternalSchemaReference                  => isEffectiveArraySchema(e.schema)
-    case o: OneOfAnyOfSchema if o.variants.size == 1 => isEffectiveArraySchema(o.variants.head)
-    case a: AllOfSchema                              => isEffectiveArraySchema(a.aggregatedSchema)
-    case _                                           => false
-  }
-
-  def referenceSchemaOption: Schema => Option[Schema] = {
-    case i: InternalSchemaReference => Some(i)
-    case e: ExternalSchemaReference => Some(e)
-    case _                          => None
-  }
-
-  object singleReferenceSchema {
-    def unapply(maybeSchemas: Option[Seq[Schema]]): Option[Schema] =
-      OptionOps
-        .getIfSingleItem(maybeSchemas)
-        .flatMap(SchemaUtils.referenceSchemaOption)
-
-  }
 
 }

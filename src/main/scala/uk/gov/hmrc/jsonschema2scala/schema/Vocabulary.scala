@@ -18,8 +18,9 @@ package uk.gov.hmrc.jsonschema2scala.schema
 
 import play.api.libs.json.JsValue
 
-object Vocabulary {
+import scala.collection.GenSet
 
+object Vocabulary {
   import Keywords._
 
   def keywordsIn(v: Set[String])(fields: Seq[(String, JsValue)]): Set[String] =
@@ -52,9 +53,9 @@ object Vocabulary {
   )
 
   final val objectCoreVocabulary: Set[String] =
-    Set(properties, patternProperties, additionalProperties, unevaluatedProperties, propertyNames)
+    Set(properties, patternProperties, additionalProperties, unevaluatedProperties)
 
-  final val arrayCoreVocabulary: Set[String] = Set(items, additionalItems, unevaluatedItems, contains)
+  final val arrayCoreVocabulary: Set[String] = Set(items, additionalItems, unevaluatedItems)
 
   final val conditionalCoreVocabulary: Set[String] = Set(
     allOf,
@@ -76,7 +77,8 @@ object Vocabulary {
     maxProperties,
     minProperties,
     required,
-    dependentRequired
+    dependentRequired,
+    propertyNames
   )
 
   final val arrayValidationVocabulary: Set[String] = Set(
@@ -84,7 +86,8 @@ object Vocabulary {
     minItems,
     uniqueItems,
     maxContains,
-    minContains
+    minContains,
+    contains
   )
 
   final val stringValidationVocabulary: Set[String] = Set(
@@ -119,6 +122,9 @@ object Vocabulary {
 
   final val objectVocabulary = objectCoreVocabulary ++ objectValidationVocabulary
   final val arrayVocabulary = arrayCoreVocabulary ++ arrayValidationVocabulary
+  final val objectAndArrayVocabulary: Set[String] = objectVocabulary ++ arrayVocabulary
+  final val oneAnyAllKeywords = Seq(oneOf, anyOf, allOf)
+  final val schemaKeyVocabulary = conditionalCoreVocabulary ++ objectCoreVocabulary ++ arrayCoreVocabulary
   final val allKeywords: Set[String] = coreVocabulary ++ validationVocabulary
   final val allKeywordsButMeta: Set[String] = allKeywords.diff(metaCoreVocabulary)
   final val allKeywordsButObject: Set[String] = allKeywords.diff(objectVocabulary)

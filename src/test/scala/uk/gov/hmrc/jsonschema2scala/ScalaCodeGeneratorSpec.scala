@@ -39,12 +39,12 @@ class ScalaCodeGeneratorSpec
     extends WordSpec with Matchers with CodeRenderingAssertions with TestSchemas with BeforeAndAfterAll {
 
   implicit val compiler: Compiler = Compiler()
-  implicit val debug: SchemaReader.DebugOptions = SchemaReader.DebugOptions()
+  implicit val debug: SchemaReader.DebugOptions = SchemaReader.DebugOptions(showMergedAllOfJson = false)
 
   override def afterAll(): Unit =
     compiler.cleanup()
 
-  "Generate from snippets" ignore {
+  "Generate from snippets" should {
 
     "fail generating from simple schema of primitive type" in
       assertRenderingFails("""

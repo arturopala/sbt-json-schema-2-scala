@@ -50,6 +50,8 @@ sealed trait Schema {
 
   def withDefinitions(definitions: Seq[Schema]): Schema =
     SchemaUtils.copyAttributes(this, attributes.copy(definitions = definitions))
+
+  def info: String
 }
 
 case class SchemaAttributes(
@@ -59,12 +61,15 @@ case class SchemaAttributes(
   definitions: Seq[Schema] = Seq.empty,
   required: Boolean,
   custom: Option[Map[String, JsValue]]
-)
+) {
+  def info: String = s"($name${if (definitions.nonEmpty) s", defs:[${definitions.map(_.name).mkString(",")}]" else ""})"
+}
 
 case class NullSchema(attributes: SchemaAttributes) extends Schema {
   override val primitive: Boolean = true
   override val validated: Boolean = false
   final override val required: Boolean = false
+  def info: String = "NullSchema" + attributes.info
 }
 
 case class StringSchema(
@@ -78,6 +83,8 @@ case class StringSchema(
   override val primitive: Boolean = true
   override val validated: Boolean =
     enum.isDefined || pattern.isDefined || minLength.isDefined || maxLength.isDefined
+
+  def info: String = "StringSchema" + attributes.info
 }
 
 case class NumberSchema(
@@ -92,6 +99,8 @@ case class NumberSchema(
 
   override val primitive: Boolean = true
   override val validated: Boolean = minimum.isDefined || maximum.isDefined || multipleOf.isDefined
+
+  def info: String = "NumberSchema" + attributes.info
 }
 
 case class IntegerSchema(
@@ -106,6 +115,8 @@ case class IntegerSchema(
 
   override val primitive: Boolean = true
   override val validated: Boolean = minimum.isDefined || maximum.isDefined || multipleOf.isDefined
+
+  def info: String = "IntegerSchema" + attributes.info
 }
 
 case class BooleanSchema(attributes: SchemaAttributes, enum: Option[Seq[Boolean]] = None) extends Schema {
@@ -113,6 +124,8 @@ case class BooleanSchema(attributes: SchemaAttributes, enum: Option[Seq[Boolean]
   override val boolean: Boolean = true
   override val validated: Boolean = false
   final override val required: Boolean = true
+
+  def info: String = "BooleanSchema" + attributes.info
 }
 
 case class ArraySchema(
@@ -130,6 +143,8 @@ case class ArraySchema(
     items.exists(_.exists(_.validated)) || minItems.isDefined || maxItems.isDefined
 
   def allItemsPrimitive: Boolean = items.forall(_.forall(_.primitive))
+
+  def info: String = "ArraySchema" + attributes.info
 }
 
 case class ObjectSchema(
@@ -144,6 +159,9 @@ case class ObjectSchema(
   final val validated: Boolean = true
 
   def isEmpty: Boolean = properties.isEmpty && patternProperties.isEmpty
+
+  def info: String =
+    "ObjectSchema" + attributes.info + (if (properties.nonEmpty) properties.map(_.name).mkString("[", ",", "]") else "")
 }
 
 case class MapSchema(
@@ -157,6 +175,8 @@ case class MapSchema(
   override val validated: Boolean = true
 
   def isEmpty: Boolean = patternProperties.isEmpty
+
+  def info: String = "MapSchema" + attributes.info
 }
 
 case class OneOfAnyOfSchema(
@@ -168,23 +188,29 @@ case class OneOfAnyOfSchema(
 
   override val primitive: Boolean = variants.forall(_.primitive)
   override val validated: Boolean = variants.nonEmpty
+
+  def info: String = "OneOfAnyOfSchema" + attributes.info + s"(variants:${variants.size})"
 }
 
 case class AllOfSchema(
   attributes: SchemaAttributes,
-  variants: Seq[Schema] = Seq.empty,
+  parts: Seq[Schema] = Seq.empty,
   requiredFields: Seq[String] = Seq.empty,
   aggregatedSchema: Schema)
     extends Schema {
 
   override val primitive: Boolean = aggregatedSchema.primitive
-  override val validated: Boolean = variants.nonEmpty
+  override val validated: Boolean = parts.nonEmpty
+
+  def info: String = "AllOfSchema" + attributes.info + s"(parts:${parts.size})"
 }
 
 case class NotSchema(attributes: SchemaAttributes, schema: Schema) extends Schema {
 
   override val primitive: Boolean = schema.primitive
   override val validated: Boolean = true
+
+  def info: String = "NotSchema" + attributes.info
 }
 
 case class IfThenElseSchema(attributes: SchemaAttributes, condition: Schema, schema: Schema, elseSchema: Option[Schema])
@@ -192,6 +218,8 @@ case class IfThenElseSchema(attributes: SchemaAttributes, condition: Schema, sch
 
   override val primitive: Boolean = schema.primitive && elseSchema.exists(_.primitive)
   override val validated: Boolean = true
+
+  def info: String = "IfThenElseSchema" + attributes.info
 }
 
 case class InternalSchemaReference(
@@ -204,6 +232,8 @@ case class InternalSchemaReference(
   override val primitive: Boolean = schema.primitive
   override val required: Boolean = requiredFields.contains(name)
   override val validated: Boolean = schema.validated
+
+  def info: String = "InternalSchemaReference" + attributes.info
 }
 
 case class ExternalSchemaReference(
@@ -217,6 +247,8 @@ case class ExternalSchemaReference(
   override val primitive: Boolean = schema.primitive
   override val required: Boolean = requiredFields.contains(name)
   override val validated: Boolean = schema.validated
+
+  def info: String = "ExternalSchemaReference" + attributes.info
 }
 
 case class SchemaStub(attributes: SchemaAttributes, reference: String) extends Schema {
@@ -224,6 +256,8 @@ case class SchemaStub(attributes: SchemaAttributes, reference: String) extends S
   override val required: Boolean = false
   override val validated: Boolean = false
   override val primitive: Boolean = false
+
+  def info: String = "SchemaStub" + attributes.info + s"(ref:$reference)"
 
 }
 

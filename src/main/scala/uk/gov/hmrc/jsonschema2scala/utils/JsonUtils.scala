@@ -25,24 +25,22 @@ object JsonUtils {
       case (value, index) => if (fx.isDefinedAt((index, value))) fx((index, value)) else Seq.empty
     }
 
-  def deepMerge(existingObject: JsObject, otherObject: JsObject): JsObject = {
-    val result = existingObject.fields ++ otherObject.fields.map {
-      case (otherKey, otherValue) =>
-        val maybeExistingValue =
-          existingObject.fields.find(_._1 == otherKey).map(_._2)
-
-        val newValue = (maybeExistingValue, otherValue) match {
-          case (Some(e: JsObject), o: JsObject) => deepMerge(e, o)
-          case (Some(e: JsArray), o: JsArray)   => JsArray((e.value ++ o.value).distinct)
-          case (Some(e: JsArray), o: JsValue)   => JsArray((e.value :+ o).distinct)
-          case (Some(e: JsValue), o: JsArray)   => JsArray((e +: o.value).distinct)
-          case (Some(e: JsValue), o: JsValue)   => if (e == o) e else JsArray(Seq(e, o))
-          case _                                => otherValue
-        }
-
-        (otherKey, newValue)
-    }
-    JsObject(result)
+  def deepMerge(left: JsValue, right: JsValue): JsValue = (left, right) match {
+    case (l: JsObject, r: JsObject) =>
+      JsObject(l.fields ++ r.fields.map {
+        case (key, vr) =>
+          (
+            key,
+            l.fields
+              .find(_._1 == key)
+              .map(_._2)
+              .map(vl => deepMerge(vl, vr))
+              .getOrElse(vr))
+      })
+    case (l: JsArray, r: JsArray) => JsArray((l.value ++ r.value).distinct)
+    case (l: JsArray, r: JsValue) => JsArray((l.value :+ r).distinct)
+    case (l: JsValue, r: JsArray) => JsArray((l +: r.value).distinct)
+    case (l, r)                   => if (l == r) l else JsArray(Seq(l, r))
   }
 
 }

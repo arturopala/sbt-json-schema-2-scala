@@ -22,6 +22,7 @@ import play.api.libs.json._
 import uk.gov.hmrc.jsonschema2scala.utils.JsonUtils
 import uk.gov.hmrc.jsonschema2scala.utils.OptionOps.{defined, emptyAsNone}
 import uk.gov.hmrc.jsonschema2scala.utils.SeqOps.{hasSingleItem, isEmpty}
+import Keywords.{`$defs`, allOf, anyOf, oneOf}
 
 import scala.util.Try
 
@@ -51,23 +52,6 @@ object SchemaReader {
     }
   }
 
-  case class DebugOptions(
-    enabled: Boolean = false,
-    showMergedAllOfJson: Boolean = false,
-    showCompiledObjectJson: Boolean = false) {
-
-    val separator = "-" * 66
-
-    def show(header: String, content: String): Unit = {
-      System.out.println("---DEBUG-START" + separator)
-      System.out.println(header)
-      System.out.println(content)
-      System.out.println("---DEBUG-END--" + separator)
-      System.out.println()
-    }
-
-  }
-
   case class Parameters(
     name: String,
     path: List[String],
@@ -93,6 +77,17 @@ object SchemaReader {
   val keywordsInVocabularyNotMeta: Seq[(String, JsValue)] => Set[String] =
     Vocabulary.keywordsIn(Vocabulary.allKeywordsButMeta)
 
+  def readSchema(p: Parameters): Schema =
+    readSchema(
+      p.name,
+      p.path,
+      p.json,
+      p.description,
+      p.requiredFields,
+      p.referenceResolver,
+      p.processDefinitions,
+      p.debug)
+
   def readSchema(
     name: String,
     currentPath: List[String],
@@ -101,73 +96,84 @@ object SchemaReader {
     requiredFields: Seq[String],
     currentReferenceResolver: SchemaReferenceResolver,
     processDefinitions: Boolean,
-    debug: DebugOptions): Schema = value match {
+    debug: DebugOptions): Schema =
+    value match {
 
-    case boolean: JsBoolean =>
-      boolean.value match {
-        case true =>
-          ObjectSchema(SchemaAttributes(name, currentPath, None, Seq.empty, false, None))
+      case boolean: JsBoolean =>
+        boolean.value match {
+          case true =>
+            ObjectSchema(SchemaAttributes(name, currentPath, None, Seq.empty, false, None))
 
-        case false =>
-          val a = SchemaAttributes(name, currentPath, None, Seq.empty, false, None)
-          NotSchema(a, ObjectSchema(a))
-      }
-
-    case json: JsObject =>
-      val isMandatory = requiredFields.contains(name)
-
-      val id: Option[URI] = attemptReadId(json)
-
-      val (referenceResolver, path) =
-        resolverAndPath(name, currentPath, json, currentReferenceResolver, id)
-
-      val description: Option[String] = externalDescription.orElse(attemptReadDescription(json))
-
-      val definitions: Seq[Schema] =
-        if (processDefinitions)
-          readDefinitions("definitions", name, path, json, description, referenceResolver, debug) ++
-            readDefinitions("$defs", name, path, json, description, referenceResolver, debug)
-        else Seq.empty
-
-      val custom: Option[Map[String, JsValue]] = {
-        val set = keywordsNotInVocabulary(json.fields)
-        if (set.isEmpty) None else Some(set.map(k => (k, (json \ k).as[JsValue])).toMap)
-      }
-
-      val p =
-        Parameters(
-          name,
-          path,
-          description,
-          definitions,
-          isMandatory,
-          custom,
-          json,
-          requiredFields,
-          referenceResolver,
-          processDefinitions,
-          debug
-        )
-
-      attemptReadExplicitType(p)
-        .orElse { attemptReadReference(p) }
-        .orElse { attemptReadImplicitType(p) }
-        .orElse { attemptReadOneOf(p) }
-        .orElse { attemptReadAnyOf(p) }
-        .orElse { attemptReadAllOf(p) }
-        .orElse { attemptReadNot(p) }
-        .orElse { attemptReadIfThenElse(p) }
-        .getOrElse {
-          // fallback to an empty object schema
-          ObjectSchema(
-            attributes = p.a,
-            requiredFields = p.requiredFields
-          )
+          case false =>
+            val a = SchemaAttributes(name, currentPath, None, Seq.empty, false, None)
+            NotSchema(a, ObjectSchema(a))
         }
 
-    case other =>
-      throw new IllegalStateException(s"Invalid schema, expected an object or boolean but got $other at $currentPath")
-  }
+      case json: JsObject =>
+        val isMandatory = requiredFields.contains(name)
+
+        val id: Option[URI] = attemptReadId(json)
+
+        val (referenceResolver, path) =
+          resolverAndPath(name, currentPath, json, currentReferenceResolver, id)
+
+        if (debug.enabled && debug.traceReadingProgress) {
+          println(s"> ${debug.incIndent}${SchemaReferenceResolver.pathToReference(path)}")
+        }
+
+        val description: Option[String] = externalDescription.orElse(attemptReadDescription(json))
+
+        val definitions: Seq[Schema] =
+          if (processDefinitions)
+            readDefinitions("definitions", name, path, json, description, referenceResolver, debug) ++
+              readDefinitions("$defs", name, path, json, description, referenceResolver, debug)
+          else Seq.empty
+
+        val custom: Option[Map[String, JsValue]] = {
+          val set = keywordsNotInVocabulary(json.fields)
+          if (set.isEmpty) None else Some(set.map(k => (k, (json \ k).as[JsValue])).toMap)
+        }
+
+        val p =
+          Parameters(
+            name,
+            path,
+            description,
+            definitions,
+            isMandatory,
+            custom,
+            json,
+            requiredFields,
+            referenceResolver,
+            processDefinitions,
+            debug
+          )
+
+        val schema = attemptReadExplicitType(p)
+          .orElse { attemptReadReference(p) }
+          .orElse { attemptReadImplicitType(p) }
+          .orElse { attemptReadOneOf(p) }
+          .orElse { attemptReadAnyOf(p) }
+          .orElse { attemptReadAllOf(p) }
+          .orElse { attemptReadNot(p) }
+          .orElse { attemptReadIfThenElse(p) }
+          .getOrElse {
+            // fallback to an empty object schema
+            ObjectSchema(
+              attributes = p.a,
+              requiredFields = p.requiredFields
+            )
+          }
+
+        if (debug.enabled && debug.traceReadingProgress) {
+          println(s"= ${debug.decIndent}${schema.info}")
+        }
+
+        schema
+
+      case other =>
+        throw new IllegalStateException(s"Invalid schema, expected an object or boolean but got $other at $currentPath")
+    }
 
   def attemptReadId(json: JsObject): Option[URI] =
     (json \ "$id")
@@ -259,6 +265,10 @@ object SchemaReader {
     val uri: URI = p.referenceResolver.resolveUri(URI.create(reference))
     val path2 = p.referenceResolver.uriToPath(uri)
 
+    if (p.debug.enabled && p.debug.traceReadingProgress) {
+      println(s"R ${p.debug.curIndent(">")}$uri")
+    }
+
     p.referenceResolver
       .lookupSchema(
         uri,
@@ -348,57 +358,51 @@ object SchemaReader {
     val patternPropertiesOpt: Option[Seq[Schema]] =
       attemptReadPatternProperties(p2).flatMap(emptyAsNone)
 
-    val additionalPropertiesOpt: Option[Seq[Schema]] =
-      attemptReadAdditionalProperties(p2).flatMap(emptyAsNone)
+    val extras: Map[String, Seq[JsObject]] =
+      readSchemaFields(p2, Set(oneOf, anyOf, allOf, "additionalProperties"), Vocabulary.schemaKeyVocabulary)
 
-    val conditionalNestedSchemas: Seq[Schema] = readConditionalNestedSchema(p)
-
-    (propertiesOpt, patternPropertiesOpt, additionalPropertiesOpt) match {
-
-      case (None, None, None) =>
-        compileObjectSchemaFrom(p, ObjectSchema(p.a), conditionalNestedSchemas)
-
-      case (None, None, SchemaUtils.singleReferenceSchema(schema)) => schema
-
-      case (None, Some(patternProperties), None) =>
-        conditionalNestedSchemas match {
-          case isEmpty() =>
-            MapSchema(p.a, patternProperties, required, alternatives)
-
+    val schema = if (extras.nonEmpty) {
+      if (propertiesOpt.isEmpty && patternPropertiesOpt.isEmpty || extras.size == 1) {
+        extras.head match {
+          case ("additionalProperties", hasSingleItem(json)) =>
+            readSchema(p2.copy(json = json, path = "additionalProperties" :: p.path))
           case _ =>
-            val objectSchema = ObjectSchema(
-              attributes = p.a,
-              requiredFields = required,
-              alternativeRequiredFields = alternatives,
-              patternProperties = patternPropertiesOpt
-            )
-
-            compileObjectSchemaFrom(p, objectSchema, conditionalNestedSchemas)
+            readObjectSchemaWithExtras(p2, extras)
         }
-
-      case _ =>
-        val propertiesUnion = propertiesOpt.getOrElse(Seq.empty) ++
-          additionalPropertiesOpt.getOrElse(Seq.empty)
-
-        val objectSchema = ObjectSchema(
-          attributes = p.a,
-          properties = propertiesUnion,
+      } else
+        readObjectSchemaWithExtras(p2, extras)
+    } else {
+      if (propertiesOpt.isEmpty && patternPropertiesOpt.nonEmpty)
+        MapSchema(p2.a, patternPropertiesOpt.get, required, alternatives)
+      else {
+        ObjectSchema(
+          attributes = p2.a,
+          properties = propertiesOpt.getOrElse(Seq.empty),
           requiredFields = required,
           alternativeRequiredFields = alternatives,
           patternProperties = patternPropertiesOpt
         )
-
-        compileObjectSchemaFrom(p, objectSchema, conditionalNestedSchemas)
+      }
     }
+    schema
   }
 
-  def readConditionalNestedSchema(p: Parameters): Seq[Schema] = {
-    val maybeOneOf: Option[Schema] = attemptReadOneOf(p)
-    val maybeAnyOf: Option[Schema] = attemptReadAnyOf(p)
-    val maybeAllOf: Option[Schema] = attemptReadAllOf(p)
-
-    Seq(maybeOneOf, maybeAnyOf, maybeAllOf).collect(defined)
-  }
+  def readSchemaFields(
+    p: Parameters,
+    keys: Set[String],
+    requiredObjectFields: Set[String]): Map[String, Seq[JsObject]] =
+    keys.toSeq
+      .map(key =>
+        emptyAsNone(p.json.fields.collect {
+          case (`key`, jsArray: JsArray) =>
+            jsArray.value.collect {
+              case jsObject: JsObject if jsObject.keys.intersect(requiredObjectFields).nonEmpty => jsObject
+            }
+          case (`key`, jsObject: JsObject) if jsObject.keys.intersect(requiredObjectFields).nonEmpty => Seq(jsObject)
+        }.flatten).map((key, _)))
+      .collect(defined)
+      .groupBy(_._1)
+      .mapValues(_.flatMap(_._2))
 
   def attemptReadProperties(p: Parameters): Option[Seq[Schema]] =
     (p.json \ "properties")
@@ -476,46 +480,6 @@ object SchemaReader {
             }
         })
 
-  def attemptReadAdditionalProperties(p: Parameters): Option[Seq[Schema]] =
-    (p.json \ "additionalProperties")
-      .asOpt[JsValue] match {
-      case Some(property: JsObject) =>
-        Some(
-          readSchema(
-            name = p.name,
-            currentPath = "additionalProperties" :: p.path,
-            value = property,
-            requiredFields = p.requiredFields,
-            currentReferenceResolver = p.referenceResolver,
-            processDefinitions = p.processDefinitions,
-            debug = p.debug
-          ))
-          .map(extractAdditionalProperties)
-
-      case _ => None
-    }
-
-  val extractAdditionalProperties: Schema => Seq[Schema] = {
-    case objectSchema: ObjectSchema => objectSchema.properties
-    case mapSchema: MapSchema       => mapSchema.patternProperties
-
-    case oneOfAnyOfSchema: OneOfAnyOfSchema =>
-      val objectLike: Seq[Schema] =
-        oneOfAnyOfSchema.variants
-          .filterNot(_.primitive)
-          .filterNot(SchemaUtils.isEffectiveArraySchema)
-      objectLike.size match {
-        case 0 => Seq()
-        case 1 => extractAdditionalProperties(objectLike.head)
-        case _ => Seq(oneOfAnyOfSchema)
-      }
-
-    case allOfSchema: AllOfSchema =>
-      extractAdditionalProperties(allOfSchema.aggregatedSchema)
-
-    case other => Seq(other) // we might want to support more cases if needed
-  }
-
   def readArraySchema(p: Parameters): ArraySchema = {
 
     val minItems = (p.json \ "minItems").asOpt[Int]
@@ -583,31 +547,33 @@ object SchemaReader {
     debug: DebugOptions): Seq[Schema] =
     (json \ propertyName)
       .asOpt[JsObject]
-      .map(
-        properties =>
-          properties.fields
-            .map(_._1)
-            .distinct
-            .map(name => {
-              val uri: URI = {
-                val reference = SchemaReferenceResolver.pathToReference(name :: propertyName :: path)
-                referenceResolver.resolveUri(URI.create(reference))
-              }
-              val path2 = referenceResolver.uriToPath(uri)
-              referenceResolver
-                .lookupSchema(
-                  uri,
-                  Some((name, value, resolver) =>
-                    readSchema(name, path2, value, description, Seq.empty, resolver, processDefinitions = true, debug)))
-                .map(_._1)
-            })
-            .collect { case Some(x) => x }
-      )
+      .map { properties =>
+        if (debug.enabled && debug.traceReadingProgress) {
+          println(s"D ${debug.curIndent(" ")}${properties.fields.map(_._1).distinct.mkString(",")}")
+        }
+        properties.fields
+          .map(_._1)
+          .distinct
+          .map(name => {
+            val uri: URI = {
+              val reference = SchemaReferenceResolver.pathToReference(name :: propertyName :: path)
+              referenceResolver.resolveUri(URI.create(reference))
+            }
+            val path2 = referenceResolver.uriToPath(uri)
+            referenceResolver
+              .lookupSchema(
+                uri,
+                Some((name, value, resolver) =>
+                  readSchema(name, path2, value, description, Seq.empty, resolver, processDefinitions = true, debug)))
+              .map(_._1)
+          })
+          .collect { case Some(x) => x }
+      }
       .getOrElse(Seq.empty)
 
   def readRequired(json: JsObject): (Seq[String], Seq[Set[String]]) = {
     val required: Seq[String] = (json \ "required").asOpt[Seq[String]].getOrElse(Seq.empty)
-    val (required2, alternatives) = (json \ "oneOf")
+    val (required2, alternatives) = (json \ oneOf)
       .asOpt[Seq[JsObject]]
       .map(s => {
         val names = s.map(o => (o \ "required").asOpt[Set[String]].getOrElse(Set.empty))
@@ -707,7 +673,7 @@ object SchemaReader {
 
   def attemptReadOneOf(p: Parameters): Option[Schema] = {
     val (requiredFields, alternatives) = readRequired(p.json)
-    (p.json \ "oneOf")
+    (p.json \ oneOf)
       .asOpt[JsArray]
       .flatMap { array =>
         readOneOfAnyOfSchema(
@@ -720,7 +686,7 @@ object SchemaReader {
 
   def attemptReadAnyOf(p: Parameters): Option[Schema] = {
     val (requiredFields, alternatives) = readRequired(p.json)
-    (p.json \ "anyOf")
+    (p.json \ anyOf)
       .asOpt[JsArray]
       .flatMap { array =>
         readOneOfAnyOfSchema(
@@ -735,147 +701,116 @@ object SchemaReader {
     p: Parameters,
     array: JsArray,
     alternativeRequiredFields: Seq[Set[String]],
-    isOneOf: Boolean): Option[OneOfAnyOfSchema] = {
+    isOneOf: Boolean): Option[Schema] = {
 
-    def readVariants(path: List[String]): JsValue => Seq[Schema] = {
+    def readVariant(path: List[String]): JsValue => (Seq[Schema], Seq[Schema]) = {
       case jsObject: JsObject =>
-        Seq(
-          readSchema(
-            p.name,
-            path,
-            jsObject,
-            requiredFields = p.requiredFields,
-            currentReferenceResolver = p.referenceResolver,
-            processDefinitions = p.processDefinitions,
-            debug = p.debug
-          ))
+        readSchema(
+          p.name,
+          path,
+          jsObject,
+          requiredFields = p.requiredFields,
+          currentReferenceResolver = p.referenceResolver,
+          processDefinitions = p.processDefinitions,
+          debug = p.debug
+        ) match {
+          case s: OneOfAnyOfSchema => (s.variants, s.definitions)
+          case s                   => (Seq(s), Seq.empty)
+        }
 
       case jsArray: JsArray =>
-        jsArray.value.zipWithIndex.flatMap { case (s, i) => readVariants(i.toString :: p.path)(s) }
+        jsArray.value.zipWithIndex.foldLeft((Seq.empty[Schema], Seq.empty[Schema])) {
+          case ((v, d), (s, i)) =>
+            val (v1, d1) = readVariant(i.toString :: p.path)(s)
+            (v ++ v1, d ++ d1)
+        }
 
       case other =>
-        throw new IllegalStateException(s"Invalid ${if (isOneOf) "oneOf" else "anyOf"} schema, expected ${p.path.reverse
+        throw new IllegalStateException(s"Invalid ${if (isOneOf) oneOf else anyOf} schema, expected ${p.path.reverse
           .mkString("/")} to be an object or array, but got ${other.getClass.getSimpleName}.")
     }
 
-    val variants: Seq[Schema] = array.value.zipWithIndex
-      .flatMap {
-        case (s, i) => readVariants(i.toString :: (if (isOneOf) "oneOf" else "anyOf") :: p.path)(s)
+    val (variants, definitions) = array.value.zipWithIndex
+      .foldLeft((Seq.empty[Schema], Seq.empty[Schema])) {
+        case ((v, d), (s, i)) =>
+          val (v1, d1) = readVariant(i.toString :: (if (isOneOf) oneOf else anyOf) :: p.path)(s)
+          (v ++ v1, d ++ d1)
       }
 
     val variants2 = variants.filterNot(SchemaUtils.isEmptySchema)
 
     if (variants2.isEmpty) None
     else
-      Some(OneOfAnyOfSchema(p.a, variants2, alternativeRequiredFields, isOneOf))
+      Some(
+        OneOfAnyOfSchema(p.a, variants2, alternativeRequiredFields, isOneOf)
+          .withDefinitions(p.definitions ++ definitions))
   }
 
   val keywordsToRemoveWhenMergingSchema: Set[String] =
-    Set(Keywords.definitions, Keywords.`$defs`, Keywords.`$id`)
+    Set(Keywords.definitions, `$defs`, Keywords.`$id`)
 
   def attemptReadAllOf(p: Parameters): Option[Schema] =
-    (p.json \ "allOf")
+    (p.json \ allOf)
       .asOpt[JsArray]
-      .map { array =>
-        array.value.length match {
-          case 0 =>
-            throw new IllegalStateException("Invalid schema, allOf array must not be empty.")
+      .map(_.value)
+      .map {
+        case isEmpty() =>
+          throw new IllegalStateException("Invalid schema, allOf array must not be empty.")
 
-          case 1 =>
-            array.value.head match {
-              case jsObject: JsObject =>
-                val schema = readSchema(
-                  p.name,
-                  "0" :: "allOf" :: p.path,
-                  jsObject,
-                  requiredFields = p.requiredFields,
-                  currentReferenceResolver = p.referenceResolver,
-                  processDefinitions = p.processDefinitions,
-                  debug = p.debug
-                )
-                AllOfSchema(p.a, Seq.empty, p.requiredFields, schema)
+        case hasSingleItem(jsValue) =>
+          jsValue match {
+            case jsObject: JsObject =>
+              val schema = readSchema(
+                p.name,
+                "0" :: allOf :: p.path,
+                jsObject,
+                requiredFields = p.requiredFields,
+                currentReferenceResolver = p.referenceResolver,
+                processDefinitions = p.processDefinitions,
+                debug = p.debug
+              )
+              AllOfSchema(p.a, Seq.empty, p.requiredFields, schema)
 
-              case other =>
-                throw new IllegalStateException(s"Invalid allOf schema, expected ${p.path.reverse
-                  .mkString("/")}/0 to be an object, but got ${other.getClass.getSimpleName}.")
-            }
+            case other =>
+              throw new IllegalStateException(s"Invalid allOf schema, expected ${p.path.reverse
+                .mkString("/")}/0 to be an object, but got ${other.getClass.getSimpleName}.")
+          }
 
-          case many => {
-            val variants: Seq[Schema] = array.value.zipWithIndex.map {
-              case (jsObject: JsObject, i) =>
-                readSchema(
-                  p.name,
-                  i.toString :: "allOf" :: p.path,
-                  jsObject,
-                  requiredFields = p.requiredFields,
-                  currentReferenceResolver = p.referenceResolver,
-                  processDefinitions = p.processDefinitions,
-                  debug = p.debug
-                )
-
-              case (other, i) =>
-                throw new IllegalStateException(s"Invalid allOf schema, expected ${p.path.reverse
-                  .mkString("/")}/$i to be an object, but got ${other.getClass.getSimpleName}.")
-            }
-
-            val compositeReferenceResolver: SchemaReferenceResolver = {
-
-              val resolvers: Seq[SchemaReferenceResolver] = array.value.flatMap {
-                case jsObject: JsObject => SchemaUtils.collectSchemaReferenceResolvers(jsObject, p.referenceResolver)
-                case _                  => Seq.empty
-              }.distinct
-
-              if (resolvers.size > 1)
-                new MultiReferenceResolver(resolvers, internal = true, upstreamResolver = None)
-              else
-                resolvers.head
-            }
-
-            val aggregatedSchema: Schema = {
-
-              val mergedJson = array.value.zipWithIndex.foldLeft(Json.obj()) {
-                case (a, (v, i)) =>
-                  v match {
-                    case json: JsObject => {
-                      SchemaUtils
-                        .dereferenceSchema(
-                          json,
-                          i.toString :: "allOf" :: p.path,
-                          p.referenceResolver,
-                          keywordsToRemoveWhenMergingSchema) match {
-
-                        case jsObject: JsObject =>
-                          JsonUtils.deepMerge(a, jsObject)
-
-                        case other =>
-                          throw new IllegalStateException(
-                            s"Unexpected schema type after dereference: ${other.getClass.getSimpleName}")
-                      }
-
-                    }
-                    case other =>
-                      throw new IllegalStateException(
-                        s"Invalid schema, allOf array element must be valid schema object, but got $other")
-                  }
-              }
-
-              if (p.debug.showMergedAllOfJson) {
-                p.debug.show("allOf merged json at " + p.path.mkString("/"), Json.prettyPrint(mergedJson))
-              }
-
+        case arrayValues => {
+          val parts: Seq[Schema] = arrayValues.zipWithIndex.map {
+            case (jsObject: JsObject, i) =>
               readSchema(
                 p.name,
-                p.path,
-                mergedJson,
-                p.description,
-                p.requiredFields,
-                compositeReferenceResolver,
-                processDefinitions = false,
-                debug = p.debug)
-            }
+                i.toString :: allOf :: p.path,
+                jsObject,
+                requiredFields = p.requiredFields,
+                currentReferenceResolver = p.referenceResolver,
+                processDefinitions = p.processDefinitions,
+                debug = p.debug
+              )
 
-            AllOfSchema(p.a, variants, p.requiredFields, aggregatedSchema)
+            case (other, i) =>
+              throw new IllegalStateException(s"Invalid allOf schema, expected ${p.path.reverse
+                .mkString("/")}/$i to be an object, but got ${other.getClass.getSimpleName}.")
           }
+
+          val (mergedJson, definitions, resolver) =
+            mergePartials(p.copy(path = allOf :: p.path), arrayValues.collect {
+              case jsObject: JsObject => jsObject
+            })
+
+          val aggregatedSchema: Schema = readSchema(
+            p.name,
+            p.path,
+            mergedJson,
+            p.description,
+            p.requiredFields,
+            resolver,
+            processDefinitions = false,
+            debug = p.debug)
+
+          AllOfSchema(p.a, parts, p.requiredFields, aggregatedSchema.withDefinitions(Seq.empty))
+            .withDefinitions(p.definitions ++ definitions /* ++ aggregatedSchema.attributes.definitions*/ )
         }
       }
 
@@ -955,69 +890,182 @@ object SchemaReader {
       }
       .getOrElse((referenceResolver, path))
 
-  def compileObjectSchemaFrom(
-    p: Parameters,
-    objectSchema: ObjectSchema,
-    conditionalNestedSchemas: Seq[Schema]): Schema =
-    conditionalNestedSchemas match {
-      case isEmpty()             => objectSchema
-      case hasSingleItem(schema) => compileObjectSchemaFrom(p, objectSchema, schema)
-      case _                     => ???
+  def readObjectSchemaWithExtras(p: Parameters, extras: Map[String, Seq[JsObject]]): Schema = {
+
+    val coreObjectJson =
+      SchemaUtils.deepResolveReferences(
+        p.json - allOf - oneOf - anyOf - "additionalProperties" - Keywords.definitions - `$defs`,
+        p.referenceResolver)
+
+    val (stage0Json, stage0Definitions, stage0Resolver) = extras
+      .get("additionalProperties")
+      .flatMap {
+        case hasSingleItem(additional) =>
+          Some(preparePartialToMerge(p.copy(json = additional, path = "additionalProperties" :: p.path)))
+        case _ =>
+          None
+      }
+      .map {
+        case (json, ds, rs) => (JsonUtils.deepMerge(coreObjectJson, json).as[JsObject], ds, SchemaReferenceResolver(rs))
+      }
+      .getOrElse((coreObjectJson, Seq.empty, p.referenceResolver))
+
+    val (stage1Json, stage1Definitions, stage1Resolver) = extras
+      .get(allOf)
+      .map { partials =>
+        val (aggregatedJson, definitions, resolver) = mergePartials(p.copy(path = allOf :: p.path), partials)
+        val mergedJson = JsonUtils.deepMerge(stage0Json, aggregatedJson).as[JsObject]
+        (mergedJson, definitions, resolver)
+      }
+      .getOrElse((stage0Json, Seq.empty, p.referenceResolver))
+
+    val (stage2Json, stage2Definitions) = (extras.get(oneOf), extras.get(anyOf)) match {
+      case (None, None) => (stage1Json, Seq.empty)
+      case (Some(variants), None) =>
+        integrateBaseIntoVariants(p.copy(json = stage1Json), oneOf, variants)
+      case (None, Some(variants)) =>
+        integrateBaseIntoVariants(p.copy(json = stage1Json), anyOf, variants)
+      case (Some(variants1), Some(variants2)) =>
+        ???
     }
 
-  def compileObjectSchemaFrom(p: Parameters, objectSchema: ObjectSchema, conditionalNestedSchema: Schema): Schema =
-    Vocabulary
-      .conditionalKeyword(conditionalNestedSchema)
-      .map { keyword =>
-        val nonPrimitives = objectSchema.properties.filter {
-          case _: ObjectSchema     => true
-          case _: MapSchema        => true
-          case _: ArraySchema      => true
-          case s: OneOfAnyOfSchema => !s.primitive
-          case s: AllOfSchema      => !s.primitive
-          case _                   => false
-        }
-        val nonPrimitiveMap: Map[String, Schema] = nonPrimitives.groupBy(_.name).mapValues(_.head)
+    val schema = readSchema(
+      p.name,
+      p.path,
+      stage2Json,
+      p.description,
+      p.requiredFields,
+      SchemaReferenceResolver(Seq(stage0Resolver, stage1Resolver)),
+      p.processDefinitions,
+      p.debug)
 
-        val json = SchemaUtils.deepResolveReferences(p.json, p.referenceResolver)
-        val remainingVocabulary = Vocabulary.metaCoreVocabulary + keyword - Keywords.definitions
-        val remainingJson = JsonUtils.filterObjectFields(json)(remainingVocabulary.contains)
-        val objectJson = JsonUtils.filterObjectFields(json)(Vocabulary.objectVocabulary.contains)
-        val objectJsonWithRefs = JsonUtils.transformObjectFields(objectJson) {
-          case ("properties", jsObject: JsObject) =>
-            ("properties", JsonUtils.transformObjectFields(jsObject) {
-              case (name, value) =>
-                (name, if (nonPrimitiveMap.contains(name)) {
-                  val schema = nonPrimitiveMap(name)
-                  JsObject(Map("$ref" -> JsString(schema.uri.toString)))
-                } else value)
-            })
-        }
+    schema.withDefinitions(
+      p.definitions ++ stage0Definitions ++ stage1Definitions ++ stage2Definitions ++ schema.attributes.definitions)
+  }
 
-        val compiledJson = JsonUtils.transformObjectFields(remainingJson) {
-          case (`keyword`, jsArray: JsArray) =>
-            (keyword, JsonUtils.transformArrayValues(jsArray) {
-              case (_, nestedVariantJson: JsObject) =>
-                JsonUtils.deepMerge(objectJsonWithRefs, nestedVariantJson)
-            })
-        }
+  def integrateBaseIntoVariants(
+    p: Parameters,
+    conditionalKeyword: String,
+    variants: Seq[JsObject]): (JsObject, Seq[Schema]) = {
 
-        if (p.debug.showCompiledObjectJson) {
-          p.debug
-            .show(s"object + $keyword: compiled json at " + p.path.mkString("/"), Json.prettyPrint(compiledJson))
-        }
+    val preservedVocabulary = Vocabulary.metaCoreVocabulary - Keywords.definitions - `$defs`
+    val preservedJson = JsonUtils.filterObjectFields(p.json)(preservedVocabulary.contains)
+    val relocatingJson = JsonUtils.filterObjectFields(p.json)(Vocabulary.objectVocabulary.contains)
 
-        readSchema(
-          p.name,
-          p.path,
-          compiledJson,
-          p.description,
-          p.requiredFields,
-          p.referenceResolver,
-          p.processDefinitions,
-          p.debug)
-          .withDefinitions(p.definitions ++ nonPrimitives)
+    val (relocatingPrunedJson, promotedToDefinitions) =
+      replacePropertiesWithReferences(p.copy(json = relocatingJson))
+
+    val modifiedJson = preservedJson + (conditionalKeyword -> JsArray(
+      variants.map(JsonUtils.deepMerge(relocatingPrunedJson, _))))
+
+    if (p.debug.enabled && p.debug.traceReadingProgress) {
+      println(s"V ${p.debug.curIndent(" ")}${SchemaReferenceResolver.pathToReference(p.path)}")
+    }
+
+    if (p.debug.showCompiledObjectJson) {
+      p.debug
+        .show(
+          s"object + $conditionalKeyword: merged json at " + SchemaReferenceResolver.pathToReference(p.path),
+          Json.prettyPrint(modifiedJson))
+    }
+
+    (modifiedJson, promotedToDefinitions)
+  }
+
+  def mergePartials(p: Parameters, partials: Seq[JsObject]): (JsObject, Seq[Schema], SchemaReferenceResolver) = {
+
+    val (aggregatedJson, definitions, resolvers) = partials.zipWithIndex
+      .map {
+        case (partialJson, index) =>
+          val partialPath = index.toString :: p.path
+          preparePartialToMerge(p.copy(json = partialJson, path = partialPath))
       }
-      .getOrElse(objectSchema)
+      .reduce { (l, r) =>
+        (JsonUtils.deepMerge(l._1, r._1).as[JsObject], l._2 ++ r._2, l._3 ++ r._3)
+      }
 
+    if (p.debug.enabled && p.debug.traceReadingProgress) {
+      println(s"M ${p.debug.curIndent(" ")}${SchemaReferenceResolver.pathToReference(p.path)}")
+    }
+
+    (aggregatedJson, definitions, SchemaReferenceResolver(resolvers))
+  }
+
+  def preparePartialToMerge(p: Parameters): (JsObject, Seq[Schema], Seq[SchemaReferenceResolver]) = {
+    val json = SchemaUtils.deepResolveReferences(p.json, p.referenceResolver)
+
+    val (pruned, promotedToDefinitions) = replacePropertiesWithReferences(p.copy(json = json))
+
+    val filtered = JsObject(pruned.fields.filterNot(f => keywordsToRemoveWhenMergingSchema.contains(f._1)))
+
+    val dereferenced = SchemaUtils.dereferenceOneLevelOfSchema(filtered, p.path, p.referenceResolver)
+
+    val resolvers: Seq[SchemaReferenceResolver] =
+      SchemaUtils.collectSchemaReferenceResolvers(json, p.referenceResolver)
+
+    (dereferenced, promotedToDefinitions, resolvers)
+  }
+
+  def replacePropertiesWithReferences(p: Parameters): (JsObject, Seq[Schema]) = {
+    val promotedToDefinitions = JsonUtils.visitObjectFields(p.json) {
+      case (key, jsObject: JsObject) if key == "properties" || key == "patternProperties" =>
+        JsonUtils.visitObjectFields(jsObject) {
+          case (name, jsObject: JsObject) if jsObject.keys.intersect(Vocabulary.objectAndArrayVocabulary).nonEmpty =>
+            Seq(
+              readSchema(
+                name,
+                name :: key :: p.path,
+                jsObject,
+                None,
+                Seq.empty,
+                p.referenceResolver,
+                processDefinitions = true,
+                p.debug))
+        }
+    }
+    val definitionsReferenceMap: Map[String, String] = promotedToDefinitions.groupBy(_.name).mapValues(_.head.uri)
+    val retrofittedJson =
+      SchemaUtils.replaceSchemaPropertiesWithReferencesUsingMap(p.json, definitionsReferenceMap)
+
+    if (p.debug.enabled && p.debug.traceReadingProgress && definitionsReferenceMap.nonEmpty) {
+      val indent = p.debug.curIndent(" ")
+      println(s"+ $indent${definitionsReferenceMap.values.mkString(s"\n  $indent")}")
+    }
+
+    (retrofittedJson, promotedToDefinitions)
+  }
+
+  case class DebugOptions(
+    enabled: Boolean = false,
+    traceReadingProgress: Boolean = false,
+    showMergedAllOfJson: Boolean = false,
+    showCompiledObjectJson: Boolean = false) {
+
+    val separator = "-" * 66
+
+    def show(header: String, content: String): Unit =
+      if (enabled) {
+        System.out.println("---DEBUG-START" + separator)
+        System.out.println(header)
+        System.out.println(content)
+        System.out.println("---DEBUG-END--" + separator)
+        System.out.println()
+      }
+
+    private var indent = 0
+
+    def incIndent: String = {
+      val i = indent
+      indent = indent + 1
+      "." * i
+    }
+
+    def decIndent: String = {
+      indent = indent - 1
+      "." * indent
+    }
+
+    def curIndent(s: String): String =
+      s * indent
+  }
 }

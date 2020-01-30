@@ -40,13 +40,16 @@ class ScalaCodeGeneratorDebugSpec
 
   implicit val compiler: Compiler = Compiler()
   implicit val debug: SchemaReader.DebugOptions =
-    SchemaReader.DebugOptions(showMergedAllOfJson = false, showCompiledObjectJson = false)
+    SchemaReader.DebugOptions(
+      enabled = false,
+      traceReadingProgress = true,
+      showMergedAllOfJson = false,
+      showCompiledObjectJson = false)
 
   override def afterAll(): Unit =
     compiler.cleanup()
 
-  val schemaToDebug: Set[String] =
-    Set("composer").map(n => s"$n.json")
+  val schemaToDebug: Set[String] = Set("swagger-2.0.json")
 
   "Generate from selected schemas" should {
     allSchemas

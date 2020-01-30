@@ -85,6 +85,14 @@ object SchemaReferenceResolver {
       if (allSchemaSources.isEmpty) None
       else Some(SchemaReferenceResolver(allSchemaSources.filterNot(_ == schemaSource))))
 
+  def apply(resolvers: Seq[SchemaReferenceResolver]): SchemaReferenceResolver = {
+    val r: Seq[SchemaReferenceResolver] = resolvers.distinct
+    if (r.size > 1)
+      new MultiReferenceResolver(r, internal = true, upstreamResolver = None)
+    else
+      r.headOption.getOrElse(throw new IllegalStateException("Expected non empty list of resolvers"))
+  }
+
   final def rootPath(uri: URI): List[String] = "#" :: uri.toString :: Nil
 
   def isFragmentOnly(uri: URI): Boolean =
