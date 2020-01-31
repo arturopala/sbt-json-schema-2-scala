@@ -28,9 +28,13 @@ object SchemaUtils {
     JsObject(schemaJson.fields.filterNot(f => keysToRemove.contains(f._1)))
 
   val isEmptySchema: PartialFunction[Schema, Boolean] = {
-    case objectSchema: ObjectSchema => objectSchema.isEmpty
-    case mapSchema: MapSchema       => mapSchema.isEmpty
-    case _                          => false
+    case objectSchema: ObjectSchema   => objectSchema.isEmpty
+    case mapSchema: MapSchema         => mapSchema.isEmpty
+    case _: NullSchema                => true
+    case not: NotSchema               => !isEmptySchema(not.schema)
+    case ref: InternalSchemaReference => isEmptySchema(ref.schema)
+    case ref: ExternalSchemaReference => isEmptySchema(ref.schema)
+    case _                            => false
   }
 
   def checkKeyExistsAndNonEmpty(schemaJson: JsObject, key: String): Boolean =
@@ -78,7 +82,7 @@ object SchemaUtils {
           case _ => None
         }
       }
-      .getOrElse(schemaJson)
+      .getOrElse(schemaJson.-("$ref"))
 
   /**
     * Rebase all nested references to the current base.

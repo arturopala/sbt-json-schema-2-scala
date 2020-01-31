@@ -43,13 +43,15 @@ class ScalaCodeGeneratorDebugSpec
     DebugOptions(
       enabled = true,
       traceReadingProgress = true,
-      showMergedAllOfJson = false,
-      showCompiledObjectJson = false)
+      showJsonAfterAggregatingPartials = false,
+      showJsonAfterEmbeddingPropertiesIntoVariants = false,
+      showJsonAfterMergingWithAdditionalProperties = false
+    )
 
   override def afterAll(): Unit =
     compiler.cleanup()
 
-  val schemaToDebug: Set[String] = Set("template.json")
+  val schemaToDebug: Set[String] = Set("jsonld.json")
 
   "Generate from selected schemas" should {
     allSchemas

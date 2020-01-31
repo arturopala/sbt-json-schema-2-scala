@@ -27,7 +27,7 @@ import scala.util.Try
 
 trait SchemaReferenceResolver {
 
-  type SchemaReader = (String, JsObject, SchemaReferenceResolver) => Schema
+  type SchemaReader = (String, JsObject, SchemaReferenceResolver, Boolean) => Schema
 
   def lookupJson(uri: URI): Option[(JsValue, SchemaReferenceResolver)]
 
@@ -111,8 +111,10 @@ object SchemaReferenceResolver {
       (givenUri.toString, rootUri.relativize(givenUri).toString)
     } else {
       val a = rootUri.resolve(givenUri)
-      (a.toString, a.relativize(givenUri).toString)
+      (removeTrailingHash(a.toString), removeTrailingHash(a.relativize(givenUri).toString))
     }
+
+  def removeTrailingHash(s: String): String = s.reverse.dropWhile(_ == '#').reverse
 
   def toJsonPointer(relativeReference: String): List[String] =
     relativeReference
@@ -172,14 +174,24 @@ final case class CachingReferenceResolver(schemaSource: SchemaSource, upstreamRe
     {
       if (isFragment || absolute.startsWith(rootUriString)) {
 
-        val jsonPointer: List[String] = toJsonPointer(relative)
+        val circularReference = cache.get(absolute).exists {
+          case _: SchemaStub => true
+          case _             => false
+        }
 
-        val result: Option[JsValue] =
-          resolveJsonPointer(jsonPointer, uri)(schemaSource.json)
-            .asOpt[JsValue]
+        if (circularReference) {
+          Some((JsNull, this))
+        } else {
 
-        result
-          .map(v => (v, this))
+          val jsonPointer: List[String] = toJsonPointer(relative)
+
+          val result: Option[JsValue] =
+            resolveJsonPointer(jsonPointer, uri)(schemaSource.json)
+              .asOpt[JsValue]
+
+          result
+            .map(v => (v, this))
+        }
 
       } else None
     }.orElse {
@@ -194,10 +206,10 @@ final case class CachingReferenceResolver(schemaSource: SchemaSource, upstreamRe
 
     def readSchema(jsObject: JsObject, name: String, reader: SchemaReader): Schema = {
       // prevent cycles by caching a schema stub
-      val stub = SchemaStub(reader(name, emptyJsObject, this), absolute)
+      val stub = SchemaStub(reader(name, emptyJsObject, this, false), absolute)
       cache.update(absolute, stub)
 
-      val schema: Schema = reader(name, jsObject, this)
+      val schema: Schema = reader(name, jsObject, this, true)
 
       cache.update(absolute, schema)
       schema

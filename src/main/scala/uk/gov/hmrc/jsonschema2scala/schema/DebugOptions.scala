@@ -3,8 +3,9 @@ package uk.gov.hmrc.jsonschema2scala.schema
 case class DebugOptions(
   enabled: Boolean = false,
   traceReadingProgress: Boolean = false,
-  showMergedAllOfJson: Boolean = false,
-  showCompiledObjectJson: Boolean = false) {
+  showJsonAfterAggregatingPartials: Boolean = false,
+  showJsonAfterEmbeddingPropertiesIntoVariants: Boolean = false,
+  showJsonAfterMergingWithAdditionalProperties: Boolean = false) {
 
   def show(header: String, content: String): Unit =
     if (enabled) {

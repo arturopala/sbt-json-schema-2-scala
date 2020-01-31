@@ -14,12 +14,15 @@ object ScalaNameProvider$ extends NameProvider {
         e.schema.name
       case s => s.name
     }
+    normalizeSchemaName(name)
+  }
+
+  override def normalizeSchemaName(name: String): String =
     firstCharUppercase(
       normalize(
         if (name.endsWith(".schema.json")) name.dropRight(12)
         else if (name.endsWith(".json")) name.dropRight(5)
         else name))
-  }
 
   override def toIdentifier(name: String): String =
     if (name.exists(noNameChars.contains) || scalaKeywords.contains(name) || Character.isDigit(name.charAt(0)))

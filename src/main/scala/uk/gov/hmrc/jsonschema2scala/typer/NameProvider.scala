@@ -28,4 +28,6 @@ trait NameProvider {
 
   def toIdentifier(name: String): String
 
+  def normalizeSchemaName(name: String): String
+
 }

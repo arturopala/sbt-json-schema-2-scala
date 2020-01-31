@@ -22,7 +22,7 @@ object TypeDefinitionsBuilder {
 
   def buildFrom(schema: Schema)(implicit typeNameProvider: NameProvider): Either[List[String], TypeDefinition] = {
 
-    val name = typeNameProvider.toTypeName(schema)
+    val name = typeNameProvider.normalizeSchemaName(schema.name)
     val types = TypeDefinitionsBuilder
       .processSchema(name, Nil, schema)
       .map { definition =>
@@ -208,7 +208,7 @@ object TypeDefinitionsBuilder {
   def processAllOfSchema(name: String, path: List[String], allOfSchema: AllOfSchema)(
     implicit typeNameProvider: NameProvider): Seq[TypeDefinition] = {
 
-    val templates = allOfSchema.parts.flatMap(processTemplates(name :: path, _))
+    val templates = allOfSchema.partials.flatMap(processTemplates(name :: path, _))
 
     templates ++ processSchema(name, path, allOfSchema.aggregatedSchema)
   }
@@ -241,8 +241,8 @@ object TypeDefinitionsBuilder {
           if oneOfAnyOfSchema.variants.collect { case _: ObjectSchema => }.nonEmpty =>
         oneOfAnyOfSchema.variants.collect { case o: ObjectSchema => o }.flatMap(calculateExternalImports)
 
-      case allOfSchema: AllOfSchema if allOfSchema.parts.collect { case _: ObjectSchema => }.nonEmpty =>
-        allOfSchema.parts.collect { case o: ObjectSchema => o }.flatMap(calculateExternalImports)
+      case allOfSchema: AllOfSchema if allOfSchema.partials.collect { case _: ObjectSchema => }.nonEmpty =>
+        allOfSchema.partials.collect { case o: ObjectSchema => o }.flatMap(calculateExternalImports)
 
       case arraySchema: ArraySchema if arraySchema.items.exists(_.isInstanceOf[ExternalSchemaReference]) =>
         Set(typeNameProvider.toTypeName(arraySchema.items.asInstanceOf[ObjectSchema]))

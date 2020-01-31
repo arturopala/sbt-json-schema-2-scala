@@ -39,7 +39,7 @@ class ScalaCodeGeneratorSpec
     extends WordSpec with Matchers with CodeRenderingAssertions with TestSchemas with BeforeAndAfterAll {
 
   implicit val compiler: Compiler = Compiler()
-  implicit val debug: DebugOptions = DebugOptions(showMergedAllOfJson = false)
+  implicit val debug: DebugOptions = DebugOptions(showJsonAfterAggregatingPartials = false)
 
   override def afterAll(): Unit =
     compiler.cleanup()

@@ -96,7 +96,7 @@ object ScalaCodeGeneratorContext {
         case oneOfSchema: OneOfAnyOfSchema =>
           oneOfSchema.variants.flatMap(collectCommonValues)
         case allOfSchema: AllOfSchema =>
-          allOfSchema.parts.flatMap(collectCommonValues)
+          allOfSchema.partials.flatMap(collectCommonValues)
         case arraySchema: ArraySchema =>
           arraySchema.items.map(_.flatMap(collectCommonValues)).getOrElse(Seq.empty)
         case _ => Seq.empty

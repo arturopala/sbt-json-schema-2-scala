@@ -48,12 +48,12 @@ sealed trait Schema {
     SchemaReferenceResolver.pathToReference(normalizedPath)
   }
 
-  def withDefinitions(definitions: Seq[Schema]): Schema =
-    SchemaUtils.copyAttributes(this, attributes.copy(definitions = definitions))
+  def addDefinitions(definitions: Seq[Schema]): Schema =
+    SchemaUtils.copyAttributes(this, attributes.copy(definitions = (attributes.definitions ++ definitions).distinct))
 
-  def info: String =
+  override def toString: String =
     s"${this.getClass.getSimpleName} name:$name${if (definitions.nonEmpty)
-      s" defs:[${definitions.map(s => s"$name:${s.getClass.getSimpleName}").mkString(", ")}]"
+      s" defs:[${definitions.map(s => s"${s.name}:${s.getClass.getSimpleName}@${s.uri}").mkString(", ")}]"
     else ""}"
 }
 
@@ -136,8 +136,8 @@ case class ArraySchema(
 
   def allItemsPrimitive: Boolean = items.forall(_.forall(_.primitive))
 
-  override def info: String =
-    super.info + items
+  override def toString: String =
+    super.toString + items
       .map(_.map(i => s"${i.getClass.getSimpleName}@${i.uri}").mkString(" items:[", ", ", "]"))
       .getOrElse("")
 }
@@ -155,10 +155,10 @@ case class ObjectSchema(
 
   def isEmpty: Boolean = properties.isEmpty && patternProperties.isEmpty
 
-  override def info: String =
-    super.info + (if (properties.nonEmpty)
-                    properties.map(s => s"$name:${s.getClass.getSimpleName}").mkString(" props:[", ", ", "]")
-                  else "")
+  override def toString: String =
+    super.toString + (if (properties.nonEmpty)
+                        properties.map(s => s"$name:${s.getClass.getSimpleName}").mkString(" props:[", ", ", "]")
+                      else "")
 }
 
 case class MapSchema(
@@ -184,22 +184,24 @@ case class OneOfAnyOfSchema(
   override val primitive: Boolean = variants.forall(_.primitive)
   override val validated: Boolean = variants.nonEmpty
 
-  override def info: String =
-    super.info + s"${variants.map(s => s"${s.getClass.getSimpleName}@${s.uri}").mkString(s" variants:(${variants.size})[", ", ", "]")}"
+  override def toString: String =
+    super.toString +
+      s"${variants.map(s => s"${s.getClass.getSimpleName}@${s.uri}").mkString(s" variants:(${variants.size})[", ", ", "]")}"
 }
 
 case class AllOfSchema(
   attributes: SchemaAttributes,
-  parts: Seq[Schema] = Seq.empty,
+  partials: Seq[Schema] = Seq.empty,
   requiredFields: Seq[String] = Seq.empty,
   aggregatedSchema: Schema)
     extends Schema {
 
   override val primitive: Boolean = aggregatedSchema.primitive
-  override val validated: Boolean = parts.nonEmpty
+  override val validated: Boolean = partials.nonEmpty
 
-  override def info: String =
-    super.info + s"${parts.map(s => s"${s.getClass.getSimpleName}@${s.uri}").mkString(s" parts:(${parts.size})[", ", ", "]")}"
+  override def toString: String =
+    super.toString +
+      s"${partials.map(s => s"${s.getClass.getSimpleName}@${s.uri}").mkString(s" parts:(${partials.size})[", ", ", "]")}"
 }
 
 case class NotSchema(attributes: SchemaAttributes, schema: Schema) extends Schema {
@@ -225,6 +227,8 @@ case class InternalSchemaReference(
   override val primitive: Boolean = schema.primitive
   override val required: Boolean = requiredFields.contains(name)
   override val validated: Boolean = schema.validated
+
+  override def toString: String = super.toString + s" ref:$reference resolvedTo:{$schema}"
 }
 
 case class ExternalSchemaReference(
@@ -238,6 +242,8 @@ case class ExternalSchemaReference(
   override val primitive: Boolean = schema.primitive
   override val required: Boolean = requiredFields.contains(name)
   override val validated: Boolean = schema.validated
+
+  override def toString: String = super.toString + s" ref:$reference resolvedTo:{$schema}"
 }
 
 case class SchemaStub(attributes: SchemaAttributes, reference: String) extends Schema {
@@ -246,7 +252,7 @@ case class SchemaStub(attributes: SchemaAttributes, reference: String) extends S
   override val validated: Boolean = false
   override val primitive: Boolean = false
 
-  override def info: String = super.info + s" ref:$reference"
+  override def toString: String = super.toString + s" ref:$reference"
 
 }
 
