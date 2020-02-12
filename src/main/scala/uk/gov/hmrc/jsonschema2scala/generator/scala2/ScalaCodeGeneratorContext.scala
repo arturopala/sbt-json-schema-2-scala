@@ -16,8 +16,10 @@
 
 package uk.gov.hmrc.jsonschema2scala.generator.scala2
 
+import uk.gov.hmrc.jsonschema2scala.generator.TypeResolver
+import uk.gov.hmrc.jsonschema2scala.utils.NameUtils.{firstCharLowercase, normalize}
 import uk.gov.hmrc.jsonschema2scala.schema._
-import uk.gov.hmrc.jsonschema2scala.typer.NameProvider
+import uk.gov.hmrc.jsonschema2scala.typer.{NameProvider, TypeDefinition}
 
 object ScalaCodeGeneratorContext {
 
@@ -91,8 +93,6 @@ object ScalaCodeGeneratorContext {
         case objectSchema: ObjectSchema =>
           val m1 = objectSchema.properties.flatMap(collectCommonValues)
           objectSchema.patternProperties.map(_.flatMap(collectCommonValues)).getOrElse(m1)
-        case mapSchema: MapSchema =>
-          mapSchema.patternProperties.flatMap(collectCommonValues)
         case oneOfSchema: OneOfAnyOfSchema =>
           oneOfSchema.variants.flatMap(collectCommonValues)
         case allOfSchema: AllOfSchema =>
@@ -124,6 +124,7 @@ case class ScalaCodeGeneratorContext(
   val validatorsOpt: Option[Unit] = toOption(options.features.contains(JsonSchema2ScalaFeature.Validator))
   val playJsonOpt: Option[Unit] = toOption(options.features.contains(JsonSchema2ScalaFeature.PlayJson))
 
-  def commonReference(s: String): String = commonValues.get(s).map(n => s"Common.$n").getOrElse(s)
+  val commonValuesObjectName = "CommonValues"
 
+  def commonReference(s: String): String = commonValues.get(s).map(n => s"$commonValuesObjectName.$n").getOrElse(s)
 }

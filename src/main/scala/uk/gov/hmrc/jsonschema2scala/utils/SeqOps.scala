@@ -6,7 +6,7 @@ object SeqOps {
     def unapply(seq: Seq[_]): Boolean = seq.isEmpty
   }
 
-  object hasSingleItem {
+  object hasSingle {
     def unapply[T](seq: Seq[T]): Option[T] =
       if (seq.size == 1) Some(seq.head) else None
   }

@@ -18,8 +18,6 @@ package uk.gov.hmrc.jsonschema2scala.schema
 
 import play.api.libs.json.JsValue
 
-import scala.collection.GenSet
-
 object Vocabulary {
   import Keywords._
 
@@ -151,7 +149,6 @@ object Vocabulary {
   def vocabularyOfSchemaType(schema: Schema): Set[String] = schema match {
     case _: ObjectSchema                   => objectVocabulary
     case _: ArraySchema                    => arrayVocabulary
-    case _: MapSchema                      => Set(patternProperties, required)
     case o: OneOfAnyOfSchema if o.isOneOf  => Set(oneOf)
     case o: OneOfAnyOfSchema if !o.isOneOf => Set(anyOf)
     case _: AllOfSchema                    => Set(allOf)

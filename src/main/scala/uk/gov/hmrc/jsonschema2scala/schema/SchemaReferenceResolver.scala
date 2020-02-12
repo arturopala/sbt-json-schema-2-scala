@@ -16,8 +16,7 @@
 
 package uk.gov.hmrc.jsonschema2scala.schema
 
-import java.net
-import java.net.URI
+import java.net.{URI, URLDecoder, URLEncoder}
 
 import play.api.libs.json._
 
@@ -27,7 +26,7 @@ import scala.util.Try
 
 trait SchemaReferenceResolver {
 
-  type SchemaReader = (String, JsObject, SchemaReferenceResolver, Boolean) => Schema
+  type SchemaReader = (String, JsObject, SchemaReferenceResolver, Option[Boolean]) => Schema
 
   def lookupJson(uri: URI): Option[(JsValue, SchemaReferenceResolver)]
 
@@ -95,16 +94,22 @@ object SchemaReferenceResolver {
 
   final def rootPath(uri: URI): List[String] = "#" :: uri.toString :: Nil
 
-  def isFragmentOnly(uri: URI): Boolean =
+  final def isFragmentOnly(uri: URI): Boolean =
     !uri.isAbsolute && (uri.getPath == null || uri.getPath.isEmpty)
 
-  final def pathToReference(path: List[String]): String =
-    path.reverse.filterNot(_.isEmpty) match {
-      case Nil           => ""
-      case x :: Nil      => x
-      case x :: y :: Nil => if (y == "#") x else s"$x/$y"
-      case x :: xs       => (if (x == "#") "#/" else x) + xs.mkString("/")
+  final def pathToReference(path: List[String]): String = {
+    def toReference(path: List[String]): String = path match {
+      case y :: "#" :: x :: Nil => x + "#/" + encodeForUri(y)
+      case "#" :: x :: Nil      => x
+      case "#" :: Nil           => "#"
+      case x :: xs              => pathToReference(xs) + "/" + encodeForUri(x)
+      case Nil                  => ""
     }
+    toReference(path.filterNot(_.isEmpty))
+  }
+
+  final def encodeForUri(s: String): String = URLEncoder.encode(s, "utf-8")
+  final def decodeFromUri(s: String): String = URLDecoder.decode(s, "utf-8")
 
   def computeAbsoluteAndRelativeUriString(rootUri: URI, givenUri: URI): (String, String) =
     if (givenUri.isAbsolute) {
@@ -114,17 +119,18 @@ object SchemaReferenceResolver {
       (removeTrailingHash(a.toString), removeTrailingHash(a.relativize(givenUri).toString))
     }
 
-  def removeTrailingHash(s: String): String = s.reverse.dropWhile(_ == '#').reverse
+  final def removeTrailingHash(s: String): String = s.reverse.dropWhile(_ == '#').reverse
 
-  def toJsonPointer(relativeReference: String): List[String] =
-    relativeReference
+  final def toJsonPointer(reference: String): List[String] =
+    reference
+      .dropWhile(_ != '#')
+      .drop(1)
       .split("/")
       .filterNot(_.isEmpty)
-      .dropWhile(_ == "#")
-      .map(s => if (s.contains("%")) net.URLDecoder.decode(s, "utf-8") else s)
+      .map(s => if (s.contains("%")) decodeFromUri(s) else s)
       .toList
 
-  def resolveJsonPointer(jsonPointer: List[String], uri: URI)(json: JsObject): JsLookupResult =
+  final def resolveJsonPointer(jsonPointer: List[String], uri: URI)(json: JsObject): JsLookupResult =
     jsonPointer
       .foldLeft[JsLookup](json) { (s, p) =>
         s match {
@@ -137,12 +143,12 @@ object SchemaReferenceResolver {
       }
       .result
 
-  def sameOrigin(uri1: URI, uri2: URI): Boolean =
+  final def sameOrigin(uri1: URI, uri2: URI): Boolean =
     uri1.getScheme == uri2.getScheme && uri1.getHost == uri2.getHost && uri1.getPath == uri2.getPath
 
   final val emptyJsObject = JsObject(Seq())
 
-  def findResolverForSchemaSource(
+  final def findResolverForSchemaSource(
     schemaSource: SchemaSource,
     currentResolver: SchemaReferenceResolver): Option[SchemaReferenceResolver] =
     currentResolver match {
@@ -206,10 +212,10 @@ final case class CachingReferenceResolver(schemaSource: SchemaSource, upstreamRe
 
     def readSchema(jsObject: JsObject, name: String, reader: SchemaReader): Schema = {
       // prevent cycles by caching a schema stub
-      val stub = SchemaStub(reader(name, emptyJsObject, this, false), absolute)
+      val stub = SchemaStub(reader(name, emptyJsObject, this, Some(false)), absolute)
       cache.update(absolute, stub)
 
-      val schema: Schema = reader(name, jsObject, this, true)
+      val schema: Schema = reader(name, jsObject, this, None)
 
       cache.update(absolute, schema)
       schema

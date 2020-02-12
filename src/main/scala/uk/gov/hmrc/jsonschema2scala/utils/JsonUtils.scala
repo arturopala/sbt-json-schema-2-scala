@@ -1,6 +1,6 @@
 package uk.gov.hmrc.jsonschema2scala.utils
 
-import play.api.libs.json.{JsArray, JsObject, JsValue}
+import play.api.libs.json.{JsArray, JsBoolean, JsObject, JsValue}
 
 object JsonUtils {
 
@@ -37,10 +37,12 @@ object JsonUtils {
               .map(vl => deepMerge(vl, vr))
               .getOrElse(vr))
       })
-    case (l: JsArray, r: JsArray) => JsArray((l.value ++ r.value).distinct)
-    case (l: JsArray, r: JsValue) => JsArray((l.value :+ r).distinct)
-    case (l: JsValue, r: JsArray) => JsArray((l +: r.value).distinct)
-    case (l, r)                   => if (l == r) l else JsArray(Seq(l, r))
+    case (_: JsBoolean, r: JsObject) => r
+    case (l: JsObject, _: JsBoolean) => l
+    case (l: JsArray, r: JsArray)    => JsArray((l.value ++ r.value).distinct)
+    case (l: JsArray, r: JsValue)    => JsArray((l.value :+ r).distinct)
+    case (l: JsValue, r: JsArray)    => JsArray((l +: r.value).distinct)
+    case (l, r)                      => if (l == r) l else JsArray(Seq(l, r))
   }
 
 }

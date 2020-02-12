@@ -51,6 +51,9 @@ sealed trait Schema {
   def addDefinitions(definitions: Seq[Schema]): Schema =
     SchemaUtils.copyAttributes(this, attributes.copy(definitions = (attributes.definitions ++ definitions).distinct))
 
+  def withName(name: String): Schema =
+    SchemaUtils.copyAttributes(this, attributes.copy(name = name))
+
   override def toString: String =
     s"${this.getClass.getSimpleName} name:$name${if (definitions.nonEmpty)
       s" defs:[${definitions.map(s => s"${s.name}:${s.getClass.getSimpleName}@${s.uri}").mkString(", ")}]"
@@ -147,31 +150,87 @@ case class ObjectSchema(
   properties: Seq[Schema] = Seq.empty,
   requiredFields: Seq[String] = Seq.empty,
   alternativeRequiredFields: Seq[Set[String]] = Seq.empty,
-  patternProperties: Option[Seq[Schema]] = None)
+  patternProperties: Option[Seq[Schema]] = None,
+  additionalProperties: Option[Schema] = None,
+  unevaluatedProperties: Option[Schema] = None,
+  minProperties: Option[Int] = None,
+  maxProperties: Option[Int] = None)
     extends Schema {
 
   final val primitive: Boolean = false
   final val validated: Boolean = true
 
-  def isEmpty: Boolean = properties.isEmpty && patternProperties.isEmpty
+  def isEmpty: Boolean = !hasExplicitProperties && !hasRequiredFields && !hasPropertiesNumberLimit
+
+  def hasExplicitProperties: Boolean =
+    properties.nonEmpty || patternProperties.nonEmpty ||
+      additionalProperties.nonEmpty || unevaluatedProperties.nonEmpty
+
+  def hasRequiredFields: Boolean = requiredFields.nonEmpty || alternativeRequiredFields.exists(_.nonEmpty)
+
+  def hasPropertiesNumberLimit: Boolean = minProperties.isDefined || (maxProperties.isDefined && maxProperties.get > 0)
+
+  def hasImplicitPropertiesOnly: Boolean =
+    hasRequiredFields && !hasExplicitProperties && !hasPropertiesNumberLimit
+
+  def hasSingleCollectiveFieldOnly: Boolean =
+    properties.isEmpty && implicitProperties.isEmpty && collectiveFields.size == 1
+
+  lazy val collectiveFields: Seq[(String, Schema)] =
+    if (hasPropertiesNumberLimit && patternProperties.isEmpty && additionalProperties.isEmpty && unevaluatedProperties.isEmpty) {
+      Seq(
+        (
+          "minMaxProperties",
+          NullSchema(
+            SchemaAttributes(
+              name = "minMaxProperties",
+              path = "minMaxProperties" :: attributes.path,
+              description = None,
+              required = true,
+              custom = None))))
+    } else {
+      Seq(
+        ("additionalProperties", additionalProperties),
+        ("unevaluatedProperties", unevaluatedProperties),
+      ).collect { case (id, Some(schema)) => (id, schema) } ++ patternProperties
+        .map {
+          _.sortBy(_.name)
+            .map(schema => (s"patternProperties/${schema.name}", schema))
+        }
+        .getOrElse(Seq.empty)
+    }
+
+  val implicitProperties: Seq[Schema] = {
+
+    def findImplicitProperties: Seq[(String, Int)] =
+      if (hasImplicitPropertiesOnly) requiredFields.zipWithIndex
+      else if (additionalProperties.isDefined || unevaluatedProperties.isDefined) Seq.empty
+      else {
+        requiredFields.zipWithIndex.filterNot {
+          case (name, _) =>
+            properties.exists(_.name == name) ||
+              patternProperties.exists(_.exists(s => name.matches(s.name)))
+        }
+      }
+
+    findImplicitProperties.map {
+      case (name, index) =>
+        NullSchema(
+          SchemaAttributes(
+            name = name,
+            path = index.toString :: "required" :: attributes.path,
+            description = None,
+            required = true,
+            custom = None))
+    }
+  }
+
+  val namedProperties: Seq[Schema] = properties ++ implicitProperties
 
   override def toString: String =
-    super.toString + (if (properties.nonEmpty)
-                        properties.map(s => s"$name:${s.getClass.getSimpleName}").mkString(" props:[", ", ", "]")
+    super.toString + (if (namedProperties.nonEmpty)
+                        namedProperties.map(s => s"$name:${s.getClass.getSimpleName}").mkString(" props:[", ", ", "]")
                       else "")
-}
-
-case class MapSchema(
-  attributes: SchemaAttributes,
-  patternProperties: Seq[Schema] = Seq.empty,
-  requiredFields: Seq[String] = Seq.empty,
-  alternativeRequiredFields: Seq[Set[String]] = Seq.empty)
-    extends Schema {
-
-  override val primitive: Boolean = false
-  override val validated: Boolean = true
-
-  def isEmpty: Boolean = patternProperties.isEmpty
 }
 
 case class OneOfAnyOfSchema(

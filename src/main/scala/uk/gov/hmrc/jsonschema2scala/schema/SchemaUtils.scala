@@ -16,7 +16,7 @@
 
 package uk.gov.hmrc.jsonschema2scala.schema
 
-import java.net.URI
+import java.net.{URI, URLEncoder}
 
 import play.api.libs.json._
 import uk.gov.hmrc.jsonschema2scala.utils.JsonUtils.{transformArrayValues, transformObjectFields, visitArrayValues, visitObjectFields}
@@ -27,23 +27,14 @@ object SchemaUtils {
   def removeKeysFromSchema(schemaJson: JsObject, keysToRemove: Set[String]): JsObject =
     JsObject(schemaJson.fields.filterNot(f => keysToRemove.contains(f._1)))
 
-  val isEmptySchema: PartialFunction[Schema, Boolean] = {
-    case objectSchema: ObjectSchema   => objectSchema.isEmpty
-    case mapSchema: MapSchema         => mapSchema.isEmpty
-    case _: NullSchema                => true
-    case not: NotSchema               => !isEmptySchema(not.schema)
-    case ref: InternalSchemaReference => isEmptySchema(ref.schema)
-    case ref: ExternalSchemaReference => isEmptySchema(ref.schema)
-    case _                            => false
-  }
-
   def checkKeyExistsAndNonEmpty(schemaJson: JsObject, key: String): Boolean =
     (schemaJson \ key)
       .asOpt[JsValue]
       .exists {
-        case jsObject: JsObject => jsObject.keys.nonEmpty
-        case jsArray: JsArray   => jsArray.value.nonEmpty
-        case _                  => true
+        case jsObject: JsObject   => jsObject.keys.nonEmpty
+        case jsArray: JsArray     => jsArray.value.nonEmpty
+        case jsBoolean: JsBoolean => jsBoolean.value
+        case _                    => true
       }
 
   def listSchemaUriToSchema(schema: Schema): Seq[(String, Schema)] =
@@ -51,13 +42,21 @@ object SchemaUtils {
       case s: ObjectSchema =>
         s.properties.flatMap(listSchemaUriToSchema) ++ s.patternProperties
           .map(_.flatMap(listSchemaUriToSchema))
+          .getOrElse(Seq.empty) ++ s.additionalProperties
+          .map(listSchemaUriToSchema)
+          .getOrElse(Seq.empty) ++ s.unevaluatedProperties
+          .map(listSchemaUriToSchema)
           .getOrElse(Seq.empty)
-      case s: MapSchema =>
-        s.patternProperties.flatMap(listSchemaUriToSchema)
+
       case s: OneOfAnyOfSchema =>
         s.variants.flatMap(listSchemaUriToSchema)
-      case arraySchema: ArraySchema => arraySchema.items.map(_.flatMap(listSchemaUriToSchema)).getOrElse(Seq.empty)
-      case _                        => Seq.empty
+
+      case arraySchema: ArraySchema =>
+        arraySchema.items
+          .map(_.flatMap(listSchemaUriToSchema))
+          .getOrElse(Seq.empty)
+
+      case _ => Seq.empty
     })
 
   /**
@@ -138,12 +137,14 @@ object SchemaUtils {
     }
   }
 
+  final def encodeForUri(s: String): String = URLEncoder.encode(s, "utf-8")
+
   def replacePropertiesSchemaWithReferenceUsingBase(schemaJson: JsObject, baseReference: String): JsObject =
     JsonUtils.transformObjectFields(schemaJson) {
       case (key, jsObject: JsObject) if key == "properties" || key == "patternProperties" =>
         (key, JsonUtils.transformObjectFields(jsObject) {
           case (name, _: JsObject) =>
-            val uri = s"$baseReference/$key/$name"
+            val uri = s"$baseReference/${encodeForUri(key)}/${encodeForUri(name)}"
             (name, JsObject(Map("$ref" -> JsString(uri))))
         })
     }
@@ -192,13 +193,21 @@ object SchemaUtils {
       }
       .getOrElse(referenceResolverCandidate)
 
-  val isNonPrimitive: Schema => Boolean = {
+  final val isNonPrimitiveSchema: Schema => Boolean = {
     case _: ObjectSchema     => true
-    case _: MapSchema        => true
     case _: ArraySchema      => true
     case s: OneOfAnyOfSchema => !s.primitive
     case s: AllOfSchema      => !s.primitive
     case _                   => false
+  }
+
+  final val isEmptySchema: Schema => Boolean = {
+    case objectSchema: ObjectSchema   => objectSchema.isEmpty
+    case _: NullSchema                => true
+    case not: NotSchema               => !isEmptySchema(not.schema)
+    case ref: InternalSchemaReference => isEmptySchema(ref.schema)
+    case ref: ExternalSchemaReference => isEmptySchema(ref.schema)
+    case _                            => false
   }
 
   def isEffectiveArraySchema: Schema => Boolean = {
@@ -210,18 +219,10 @@ object SchemaUtils {
     case _                                           => false
   }
 
-  def referenceSchemaOption: Schema => Option[Schema] = {
-    case i: InternalSchemaReference => Some(i)
-    case e: ExternalSchemaReference => Some(e)
+  def referencedSchemaOption: Schema => Option[Schema] = {
+    case i: InternalSchemaReference => Some(i.schema)
+    case e: ExternalSchemaReference => Some(e.schema)
     case _                          => None
-  }
-
-  object singleReferenceSchema {
-    def unapply(maybeSchemas: Option[Seq[Schema]]): Option[Schema] =
-      OptionOps
-        .getIfSingleItem(maybeSchemas)
-        .flatMap(SchemaUtils.referenceSchemaOption)
-
   }
 
   def copy(schema: Schema, name: String): Schema = {
@@ -240,8 +241,6 @@ object SchemaUtils {
       case s: ObjectSchema =>
         s.copy(attributes = newAttributes)
       case s: ArraySchema =>
-        s.copy(attributes = newAttributes)
-      case s: MapSchema =>
         s.copy(attributes = newAttributes)
       case s: OneOfAnyOfSchema =>
         s.copy(attributes = newAttributes)

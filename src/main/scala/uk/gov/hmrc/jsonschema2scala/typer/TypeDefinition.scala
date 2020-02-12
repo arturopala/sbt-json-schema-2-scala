@@ -27,7 +27,8 @@ case class TypeDefinition(
   interfaces: Seq[Schema] = Seq.empty,
   subtypes: Seq[Schema] = Seq.empty,
   externalImports: Set[String] = Set.empty,
-  forReferenceOnly: Boolean = false)
+  forReferenceOnly: Boolean = false,
+  collectiveFieldsAggregated: Seq[CollectiveField] = Seq.empty)
 
 object TypeDefinition {
 

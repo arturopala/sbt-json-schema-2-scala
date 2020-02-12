@@ -75,17 +75,16 @@ class ScalaTypeResolver(
       case _: NullSchema    => any
 
       case objectSchema: ObjectSchema =>
-        if (objectSchema.properties.isEmpty && objectSchema.patternProperties.isEmpty) anyRef
-        else
-          schemaTypeNameAsSeenFrom(objectSchema, viewpoint)
-            .getOrElse(
+        schemaTypeNameAsSeenFrom(objectSchema, viewpoint)
+          .getOrElse(
+            if (objectSchema.isEmpty) s"Map[String,$any]"
+            else if (objectSchema.hasSingleCollectiveFieldOnly) {
+              val fieldSchema = objectSchema.collectiveFields.head._2
+              val schemaType = typeOf(fieldSchema, viewpoint, wrapAsOption = false)
+              s"Map[String,$schemaType]"
+            } else
               throw new IllegalStateException(
                 s"Resolving type of object schema ${objectSchema.uri}, but the type definition unknown."))
-
-      case mapSchema: MapSchema =>
-        if (mapSchema.patternProperties.size == 1)
-          s"Map[String,${typeOf(mapSchema.patternProperties.head, viewpoint, wrapAsOption = false)}]"
-        else s"Map[String,$any]"
 
       case arraySchema: ArraySchema =>
         arraySchema.items

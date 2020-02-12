@@ -22,12 +22,9 @@ trait NameProvider {
 
   def toTypeName(schema: Schema): String
 
-  def toTypeNameVariant(schema: Schema, pos: Int): String
+  def toIdentifier(name: String, suffix: String = ""): String
 
-  def toTypePatternName(schema: Schema): String
+  def toFieldName(schema: Schema): String
 
-  def toIdentifier(name: String): String
-
-  def normalizeSchemaName(name: String): String
-
+  def combine(prefix: String, suffix: String): String
 }

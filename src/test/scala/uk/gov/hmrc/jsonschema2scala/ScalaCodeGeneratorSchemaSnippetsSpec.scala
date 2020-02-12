@@ -33,9 +33,9 @@ package uk.gov.hmrc.jsonschema2scala
  */
 
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpec}
-import uk.gov.hmrc.jsonschema2scala.schema.{DebugOptions, SchemaSource}
+import uk.gov.hmrc.jsonschema2scala.schema.DebugOptions
 
-class ScalaCodeGeneratorSpec
+class ScalaCodeGeneratorSchemaSnippetsSpec
     extends WordSpec with Matchers with CodeRenderingAssertions with TestSchemas with BeforeAndAfterAll {
 
   implicit val compiler: Compiler = Compiler()
@@ -44,7 +44,7 @@ class ScalaCodeGeneratorSpec
   override def afterAll(): Unit =
     compiler.cleanup()
 
-  "Generate from snippets" should {
+  "Generate from schema snippets" should {
 
     "fail generating from simple schema of primitive type" in
       assertRenderingFails("""
@@ -449,7 +449,11 @@ class ScalaCodeGeneratorSpec
                                  |      "additionalProperties": {
                                  |        "anyOf": [
                                  |          {
-                                 |            "additionalProperties": {},
+                                 |            "properties": {
+                                 |              "one": {
+                                 |                "type": "string"
+                                 |              }
+                                 |            },
                                  |            "type": "object"
                                  |          },
                                  |          {
@@ -680,14 +684,141 @@ class ScalaCodeGeneratorSpec
                                  |    }
                                  |  ]
                                  |}""".stripMargin)
-  }
 
-  "Generate from known schemas" should {
+    "generate from top level additionalProperties" in
+      assertCanParseAndCompile("""{
+                                 |  "$id": "http://example.com/test.json",
+                                 |  "description": "A test schema",
+                                 |  "type": "object",
+                                 |  "additionalProperties": {
+                                 |    "$ref":"#/definitions/item"
+                                 |  },
+                                 |  "definitions": {
+                                 |    "item": {
+                                 |        "type": "object",
+                                 |        "properties": {
+                                 |            "one": {
+                                 |                "type": "string"
+                                 |            }
+                                 |        },
+                                 |        "required": ["one"]
+                                 |    }
+                                 |  }
+                                 |}""".stripMargin)
 
-    verifiedTestSchemas
-      .foreach { schema: SchemaSource =>
-        s"generate from ${schema.name}" in assertCanParseAndCompile(schema, allSchemas)
-      }
+    "generate from top level unevaluatedProperties" in
+      assertCanParseAndCompile("""{
+                                 |  "$id": "http://example.com/test.json",
+                                 |  "description": "A test schema",
+                                 |  "type": "object",
+                                 |  "unevaluatedProperties": {
+                                 |    "$ref":"#/definitions/item"
+                                 |  },
+                                 |  "definitions": {
+                                 |    "item": {
+                                 |        "type": "object",
+                                 |        "properties": {
+                                 |            "one": {
+                                 |                "type": "string"
+                                 |            }
+                                 |        },
+                                 |        "required": ["one"]
+                                 |    }
+                                 |  }
+                                 |}""".stripMargin)
+
+    "generate from top level patternProperties" in
+      assertCanParseAndCompile("""{
+                                 |  "$id": "http://example.com/test.json",
+                                 |  "description": "A test schema",
+                                 |  "type": "object",
+                                 |  "patternProperties": {
+                                 |    "_[a-z]+":{
+                                 |      "$ref":"#/definitions/item1"
+                                 |    },
+                                 |    "_a[0-9]+":{
+                                 |      "$ref":"#/definitions/item2"
+                                 |    }
+                                 |  },
+                                 |  "definitions": {
+                                 |    "item1": {
+                                 |        "type": "object",
+                                 |        "properties": {
+                                 |            "one": {
+                                 |                "type": "string"
+                                 |            }
+                                 |        },
+                                 |        "required": ["one"]
+                                 |    },
+                                 |    "item2": {
+                                 |        "type": "object",
+                                 |        "properties": {
+                                 |            "one": {
+                                 |                "type": "integer"
+                                 |            }
+                                 |        }
+                                 |    }
+                                 |  }
+                                 |}""".stripMargin)
+
+    "generate from top level additional, unevaluated and multiple patternProperties of the same type" in
+      assertCanParseAndCompile("""{
+                                 |  "$id": "http://example.com/test.json",
+                                 |  "description": "A test schema",
+                                 |  "type": "object",
+                                 |  "additionalProperties": {
+                                 |    "$ref":"#/definitions/item"
+                                 |  },
+                                 |  "unevaluatedProperties": {
+                                 |    "$ref":"#/definitions/item"
+                                 |  },
+                                 |  "patternProperties": {
+                                 |    "_[a-z]+":{
+                                 |      "$ref":"#/definitions/item"
+                                 |    },
+                                 |    "_a[0-9]+":{
+                                 |      "$ref":"#/definitions/item"
+                                 |    }
+                                 |  },
+                                 |  "definitions": {
+                                 |    "item": {
+                                 |        "type": "object",
+                                 |        "properties": {
+                                 |            "one": {
+                                 |                "type": "string"
+                                 |            }
+                                 |        },
+                                 |        "required": ["one"]
+                                 |    }
+                                 |  }
+                                 |}""".stripMargin)
+
+    "generate from top level additional, unevaluated and multiple patternProperties of different primitive type" in
+      assertCanParseAndCompile("""{
+                                 |  "$id": "http://example.com/test.json",
+                                 |  "description": "A test schema",
+                                 |  "type": "object",
+                                 |  "additionalProperties": {
+                                 |    "type": "string"
+                                 |  },
+                                 |  "unevaluatedProperties": {
+                                 |    "type": "number"
+                                 |  },
+                                 |  "patternProperties": {
+                                 |    "_\\d[a-z]+":{
+                                 |      "type": "boolean"
+                                 |    },
+                                 |    "_a[0-9]+":{
+                                 |      "type": "array",
+                                 |      "items": {
+                                 |        "type": "object",
+                                 |        "properties":{
+                                 |          "one": { "type": "string" }
+                                 |        }
+                                 |      }
+                                 |    }
+                                 |  }
+                                 |}""".stripMargin)
   }
 
 }

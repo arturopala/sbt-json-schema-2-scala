@@ -35,26 +35,18 @@ package uk.gov.hmrc.jsonschema2scala
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpec}
 import uk.gov.hmrc.jsonschema2scala.schema.{DebugOptions, SchemaSource}
 
-class ScalaCodeGeneratorDebugSpec
+class ScalaCodeGeneratorKnownSchemaSpec
     extends WordSpec with Matchers with CodeRenderingAssertions with TestSchemas with BeforeAndAfterAll {
 
   implicit val compiler: Compiler = Compiler()
-  implicit val debug: DebugOptions =
-    DebugOptions(
-      enabled = false,
-      traceReadingProgress = true,
-      showJsonAfterAggregatingPartials = true,
-      showJsonAfterEmbeddingPropertiesIntoVariants = true,
-      showJsonAfterMergingWithAdditionalProperties = true
-    )
+  implicit val debug: DebugOptions = DebugOptions()
 
-  override def afterAll(): Unit = compiler.cleanup()
+  override def afterAll(): Unit =
+    compiler.cleanup()
 
-  val schemaToDebug: Set[String] = Set("appsettings.json")
+  "Generate from known schemas" should {
 
-  "Generate from selected schemas" should {
-    allSchemas
-      .filter(s => schemaToDebug.contains(s.name))
+    verifiedTestSchemas
       .foreach { schema: SchemaSource =>
         s"generate from ${schema.name}" in assertCanParseAndCompile(schema, allSchemas)
       }
