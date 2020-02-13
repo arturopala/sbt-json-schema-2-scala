@@ -131,6 +131,9 @@ object Vocabulary {
     Set(properties, additionalProperties, patternProperties, definitions, items)
   final val jsonArrayKeywords: Set[String] = Set(items, additionalItems, allOf, anyOf, oneOf, not)
 
+  final val keywordsNotInVocabulary: Seq[(String, JsValue)] => Set[String] =
+    keywordsNotIn(allKeywords)
+
   object holdsJsonObject {
     def unapply(keyword: String): Option[String] =
       Some(keyword).filter(jsonObjectKeywords.contains)

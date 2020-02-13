@@ -28,6 +28,25 @@ import scala.util.Try
 
 object SchemaReader {
 
+  case class Parameters(
+    name: String,
+    path: List[String],
+    json: JsObject,
+    description: Option[String],
+    definitions: Seq[Schema],
+    required: Boolean,
+    requiredFields: Seq[String],
+    referenceResolver: SchemaReferenceResolver,
+    processDefinitions: Boolean,
+    customFields: Option[Map[String, JsValue]],
+    debug: DebugOptions) {
+
+    val a: SchemaAttributes =
+      SchemaAttributes(name, path, description, definitions, required, customFields)
+
+    def currentUri: String = SchemaReferenceResolver.pathToReference(path)
+  }
+
   def read(schemaSource: SchemaSource, resolver: SchemaReferenceResolver, debug: DebugOptions): Schema = {
     val path = SchemaReferenceResolver.rootPath(schemaSource.uri)
     resolver.lookupSchema(
@@ -39,11 +58,12 @@ object SchemaReader {
             path = path,
             json = jsObject,
             description = None,
-            requiredFields = Seq.empty,
+            definitions = Seq.empty,
             required = false,
+            requiredFields = Seq.empty,
             referenceResolver = resolver,
             processDefinitions = true,
-            definitions = Seq.empty,
+            customFields = None,
             debug = debug.copy(enabled = enableDebug.getOrElse(debug.enabled))
           )))
     ) match {
@@ -53,31 +73,6 @@ object SchemaReader {
       case Some((schema, _)) => schema
     }
   }
-
-  case class Parameters(
-    name: String,
-    path: List[String],
-    description: Option[String],
-    definitions: Seq[Schema],
-    required: Boolean,
-    custom: Option[Map[String, JsValue]] = None,
-    json: JsObject,
-    requiredFields: Seq[String],
-    referenceResolver: SchemaReferenceResolver,
-    processDefinitions: Boolean,
-    debug: DebugOptions) {
-
-    val a: SchemaAttributes =
-      SchemaAttributes(name, path, description, definitions, required, custom)
-
-    def currentUri: String = SchemaReferenceResolver.pathToReference(path)
-  }
-
-  val keywordsNotInVocabulary: Seq[(String, JsValue)] => Set[String] =
-    Vocabulary.keywordsNotIn(Vocabulary.allKeywords)
-
-  val keywordsInVocabularyNotMeta: Seq[(String, JsValue)] => Set[String] =
-    Vocabulary.keywordsIn(Vocabulary.allKeywordsButMeta)
 
   def readSchema(p0: Parameters): Schema = {
 
@@ -101,7 +96,7 @@ object SchemaReader {
       else Seq.empty
 
     val custom: Option[Map[String, JsValue]] = {
-      val set = keywordsNotInVocabulary(p0.json.fields)
+      val set = Vocabulary.keywordsNotInVocabulary(p0.json.fields)
       if (set.isEmpty) None else Some(set.map(k => (k, (p0.json \ k).as[JsValue])).toMap)
     }
 
@@ -110,8 +105,8 @@ object SchemaReader {
       description = description,
       definitions = definitions,
       required = required,
-      custom = custom,
-      referenceResolver = referenceResolver)
+      referenceResolver = referenceResolver,
+      customFields = custom)
 
     val schema = attemptReadExplicitType(p)
       .orElse { attemptReadReference(p) }
@@ -257,15 +252,16 @@ object SchemaReader {
       .lookupSchema(
         uri,
         Some(
-          (name, json, resolver, enableDebug) =>
+          (name, jsObject, resolver, enableDebug) =>
             readSchema(
               p.copy(
                 name = name,
                 path = path2,
-                json = json,
+                json = jsObject,
                 referenceResolver = resolver,
                 processDefinitions = true,
-                debug = p.debug.copy(enabled = enableDebug.getOrElse(p.debug.enabled)))
+                debug = p.debug.copy(enabled = enableDebug.getOrElse(p.debug.enabled))
+              )
           ))
       ) match {
 
@@ -289,11 +285,11 @@ object SchemaReader {
                 .flatMap(uri =>
                   resolver.lookupSchema(
                     uri,
-                    Some((name, value, resolver, enableDebug) =>
+                    Some((name, jsObject, resolver, enableDebug) =>
                       readSchema(p.copy(
                         name = name,
                         path = Nil,
-                        json = value,
+                        json = jsObject,
                         description = None,
                         requiredFields = Seq.empty,
                         referenceResolver = resolver,
@@ -366,7 +362,7 @@ object SchemaReader {
         extras.head match {
 
           case (name, hasSingle(json)) =>
-            val s = readSchema(p2.copy(json = json, path = "0" :: name :: p.path))
+            val s = readSchema(p2.copy(path = "0" :: name :: p.path, json = json))
             s.addDefinitions(p2.definitions)
 
           case _ =>
@@ -461,7 +457,7 @@ object SchemaReader {
       .asOpt[JsValue]
       .flatMap {
         case json: JsObject =>
-          val schema = readSchema(p.copy(json = json, path = key :: p.path, description = None)) match {
+          val schema = readSchema(p.copy(path = key :: p.path, json = json, description = None)) match {
             case s if s.name != p.name => s
             case s                     => s.withName(s"${s.name}$suffix")
           }
@@ -470,7 +466,7 @@ object SchemaReader {
         case jsArray: JsArray =>
           val variants = jsArray.value.zipWithIndex.collect {
             case (json: JsObject, index) =>
-              readSchema(p.copy(json = json, path = index.toString :: key :: p.path, description = None))
+              readSchema(p.copy(path = index.toString :: key :: p.path, json = json, description = None))
           }
           wrapVariantsAsSchema(p, variants)
 
@@ -534,14 +530,14 @@ object SchemaReader {
   }
 
   def readDefinitions(
-    propertyName: String,
+    key: String,
     name: String,
     path: List[String],
     json: JsObject,
     description: Option[String] = None,
     referenceResolver: SchemaReferenceResolver,
     debug: DebugOptions): Seq[Schema] =
-    (json \ propertyName)
+    (json \ key)
       .asOpt[JsObject]
       .map { properties =>
         if (debug.enabled && debug.traceReadingProgress) {
@@ -553,24 +549,25 @@ object SchemaReader {
           .distinct
           .map(name => {
             val uri: URI = {
-              val reference = SchemaReferenceResolver.pathToReference(name :: propertyName :: path)
+              val reference = SchemaReferenceResolver.pathToReference(name :: key :: path)
               referenceResolver.resolveUri(URI.create(reference))
             }
             val path2 = referenceResolver.uriToPath(uri)
             referenceResolver
               .lookupSchema(
                 uri,
-                Some((name, value, resolver, enableDebug) =>
+                Some((name, jsObject, resolver, enableDebug) =>
                   readSchema(Parameters(
                     name = name,
                     path = path2,
-                    json = value,
+                    json = jsObject,
                     description = description,
-                    requiredFields = Seq.empty,
+                    definitions = Seq.empty,
                     required = false,
+                    requiredFields = Seq.empty,
                     referenceResolver = resolver,
                     processDefinitions = true,
-                    definitions = Seq.empty,
+                    customFields = None,
                     debug = debug.copy(enabled = enableDebug.getOrElse(debug.enabled))
                   )))
               )
@@ -945,7 +942,7 @@ object SchemaReader {
       .map {
         case (partialJson, index) =>
           val partialPath = index.toString :: p.path
-          preparePartialSchemaToMerge(p.copy(json = partialJson, path = partialPath))
+          preparePartialSchemaToMerge(p.copy(path = partialPath, json = partialJson))
       }
       .reduce { (l, r) =>
         (JsonUtils.deepMerge(l._1, r._1).as[JsObject], l._2 ++ r._2, l._3 ++ r._3)
