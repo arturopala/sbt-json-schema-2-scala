@@ -46,12 +46,12 @@ class ScalaCodeGeneratorDebugSpec
       showJsonAfterAggregatingPartials = false,
       showJsonAfterEmbeddingPropertiesIntoVariants = false,
       showJsonAfterMergingWithAdditionalProperties = false,
-      showJsonAfterInliningConditionals = true
+      showJsonAfterInliningConditionals = false
     )
 
   override def afterAll(): Unit = compiler.cleanup()
 
-  val schemaToDebug: Set[String] = Set("grunt-copy-task.json")
+  val schemaToDebug: Set[String] = Set("vega.json")
 
   "Generate from selected schemas" should {
     allSchemas
