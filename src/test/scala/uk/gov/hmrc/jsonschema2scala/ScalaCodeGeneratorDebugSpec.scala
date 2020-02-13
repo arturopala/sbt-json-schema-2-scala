@@ -41,16 +41,17 @@ class ScalaCodeGeneratorDebugSpec
   implicit val compiler: Compiler = Compiler()
   implicit val debug: DebugOptions =
     DebugOptions(
-      enabled = false,
+      enabled = true,
       traceReadingProgress = true,
-      showJsonAfterAggregatingPartials = true,
-      showJsonAfterEmbeddingPropertiesIntoVariants = true,
-      showJsonAfterMergingWithAdditionalProperties = true
+      showJsonAfterAggregatingPartials = false,
+      showJsonAfterEmbeddingPropertiesIntoVariants = false,
+      showJsonAfterMergingWithAdditionalProperties = false,
+      showJsonAfterInliningConditionals = true
     )
 
   override def afterAll(): Unit = compiler.cleanup()
 
-  val schemaToDebug: Set[String] = Set("appsettings.json")
+  val schemaToDebug: Set[String] = Set("grunt-copy-task.json")
 
   "Generate from selected schemas" should {
     allSchemas

@@ -46,7 +46,7 @@ class ScalaCodeGeneratorSchemaSnippetsSpec
 
   "Generate from schema snippets" should {
 
-    "fail generating from simple schema of primitive type" in
+    "fail generating from schema of primitive type" in
       assertRenderingFails("""
                              |{
                              |  "$id": "http://example.com/test.json",
@@ -55,7 +55,7 @@ class ScalaCodeGeneratorSchemaSnippetsSpec
                              |}
         """.stripMargin)
 
-    "generate from simple schema into a case class without body and no companion object" in
+    "generate from schema into a case class without body and no companion object" in
       assertCanParseAndCompile("""
                                  |{
                                  |  "$id": "http://example.com/test.json",
@@ -76,7 +76,7 @@ class ScalaCodeGeneratorSchemaSnippetsSpec
                                  |}
         """.stripMargin)
 
-    "generate from simple schema with cyclic self-reference" in
+    "generate from schema with cyclic self-reference" in
       assertCanParseAndCompile("""
                                  |{
                                  |  "$id": "http://example.com/test.json",
@@ -95,6 +95,36 @@ class ScalaCodeGeneratorSchemaSnippetsSpec
                                  |  }
                                  |}
         """.stripMargin)
+
+    "generate from schema with cyclic self-reference and additionalProperties" in
+      assertCanParseAndCompile("""
+                                 |{
+                                 |  "$id": "http://example.com/test.json",
+                                 |  "description": "A test schema",
+                                 |  "type": "object",
+                                 |  "minProperties": 1,
+                                 |  "additionalProperties": {
+                                 |    "anyOf": [
+                                 |      {
+                                 |        "properties":{
+                                 |          "one": {
+                                 |            "$ref": "#/definitions/one"
+                                 |          }
+                                 |        },
+                                 |        "required": [ "one" ]
+                                 |      },
+                                 |      {
+                                 |        "$ref": "#/definitions/one"
+                                 |      }
+                                 |    ]
+                                 |  },
+                                 |  "definitions": {
+                                 |    "one": {
+                                 |      "$ref": "http://example.com/test.json"
+                                 |    }
+                                 |  }
+                                 |}
+                               """.stripMargin)
 
     "generate from schema having deeply nested objects" in
       assertCanParseAndCompile("""
@@ -157,7 +187,7 @@ class ScalaCodeGeneratorSchemaSnippetsSpec
                                  |}
         """.stripMargin)
 
-    "generate from simple schema of an object having array of primitives" in
+    "generate from schema of an object having array of primitives" in
       assertCanParseAndCompile("""
                                  |{
                                  |  "$id": "http://example.com/test.json",
@@ -179,7 +209,7 @@ class ScalaCodeGeneratorSchemaSnippetsSpec
                                  |}
         """.stripMargin)
 
-    "generate from simple schema of an object having array of objects" in
+    "generate from schema of an object having array of objects" in
       assertCanParseAndCompile("""
                                  |{
                                  |    "$id": "http://example.com/test.json",
@@ -210,7 +240,7 @@ class ScalaCodeGeneratorSchemaSnippetsSpec
                                  |}
                                  |""".stripMargin)
 
-    "generate from simple schema containing oneOf alternative primitive values" in
+    "generate from schema containing oneOf alternative primitive values" in
       assertCanParseAndCompile("""
                                  |{
                                  |  "$id": "http://example.com/test.json",
@@ -323,7 +353,7 @@ class ScalaCodeGeneratorSchemaSnippetsSpec
                                  |  }
                                  |}""".stripMargin)
 
-    "generate from simple schema containing oneOf alternative object and primitive values" in
+    "generate from schema containing oneOf alternative object and primitive values" in
       assertCanParseAndCompile("""
                                  |{
                                  |  "$id": "http://example.com/test.json",

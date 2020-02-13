@@ -115,7 +115,7 @@ object SchemaReader {
         val id: Option[URI] = attemptReadId(json)
 
         val (referenceResolver, path) =
-          resolverAndPath(name, currentPath, json, currentReferenceResolver, id)
+          updatedResolverAndPath(name, currentPath, json, currentReferenceResolver, id)
 
         if (debug.enabled && debug.traceReadingProgress) {
           println(s"> ${debug.incIndent(".")} ${SchemaReferenceResolver.pathToReference(path)}")
@@ -996,7 +996,7 @@ object SchemaReader {
           }
       }
 
-  def resolverAndPath(
+  def updatedResolverAndPath(
     name: String,
     path: List[String],
     json: JsObject,
@@ -1034,8 +1034,15 @@ object SchemaReader {
           s"Unsupported schema with both oneOf and anyOf at ${SchemaReferenceResolver.pathToReference(p.path)}")
     }
 
-    val schema: Schema = readSchema(
-      p.copy(json = stage2Json, referenceResolver = SchemaReferenceResolver(Seq(stage1Resolver))))
+    if (p.debug.showJsonAfterInliningConditionals) {
+      p.debug
+        .show(
+          s"object + extras [${extras.keys.mkString(",")}]: combined json at " + SchemaReferenceResolver
+            .pathToReference(p.path),
+          Json.prettyPrint(stage2Json))
+    }
+
+    val schema: Schema = readSchema(p.copy(json = stage2Json, referenceResolver = stage1Resolver))
 
     schema.addDefinitions(p.definitions ++ stage1Definitions ++ stage2Definitions)
   }
@@ -1047,35 +1054,47 @@ object SchemaReader {
 
     val preservedVocabulary = Vocabulary.metaCoreVocabulary - Keywords.definitions - `$defs`
     val preservedJson = JsonUtils.filterObjectFields(p.json)(preservedVocabulary.contains)
-    val relocatingJson = JsonUtils.filterObjectFields(p.json)(Vocabulary.objectVocabulary.contains)
 
-    val (relocatingPrunedJson, promotedToDefinitions) =
-      replacePropertiesSchemaWithReferenceAndCollectDefinitions(p.copy(json = relocatingJson))
+    if (preservedJson.keys.isEmpty) {
+      (preservedJson + (conditionalKeyword -> JsArray(variants)), Seq.empty)
+    } else {
 
-    val modifiedJson = preservedJson + (conditionalKeyword -> JsArray(variants.zipWithIndex.map {
-      case (variant, index) =>
-        val dereferencedVariant =
-          SchemaUtils.dereferenceOneLevelOfSchema(variant, index.toString :: p.path, p.referenceResolver)
-        JsonUtils.deepMerge(relocatingPrunedJson, dereferencedVariant)
-    }))
+      if (p.debug.enabled && p.debug.traceReadingProgress) {
+        println(
+          s"C ${p.debug.curIndent("=")} combining object with ${variants.size} variants $conditionalKeyword@${SchemaReferenceResolver
+            .pathToReference(p.path)}")
+      }
 
-    if (p.debug.enabled && p.debug.traceReadingProgress) {
-      println(
-        s"C ${p.debug.curIndent("=")} combining object with ${variants.size} variants $conditionalKeyword@${SchemaReferenceResolver
-          .pathToReference(p.path)}")
+      val relocatingJson = JsonUtils.filterObjectFields(p.json)(Vocabulary.objectVocabulary.contains)
+
+      val (relocatingPrunedJson, promotedToDefinitions) =
+        replacePropertiesSchemaWithReferenceAndCollectDefinitions(p.copy(json = relocatingJson))
+
+      val modifiedJson = preservedJson + (conditionalKeyword -> JsArray(variants.zipWithIndex.map {
+        case (variant, index) =>
+          val dereferencedVariant =
+            SchemaUtils.dereferenceOneLevelOfSchema(variant, index.toString :: p.path, p.referenceResolver)
+          JsonUtils.deepMerge(relocatingPrunedJson, dereferencedVariant)
+      }))
+
+      if (p.debug.showJsonAfterEmbeddingPropertiesIntoVariants) {
+        p.debug
+          .show(
+            s"object + $conditionalKeyword: combined json at " + SchemaReferenceResolver.pathToReference(p.path),
+            Json.prettyPrint(modifiedJson))
+      }
+
+      (modifiedJson, promotedToDefinitions)
     }
-
-    if (p.debug.showJsonAfterEmbeddingPropertiesIntoVariants) {
-      p.debug
-        .show(
-          s"object + $conditionalKeyword: combined json at " + SchemaReferenceResolver.pathToReference(p.path),
-          Json.prettyPrint(modifiedJson))
-    }
-
-    (modifiedJson, promotedToDefinitions)
   }
 
   def mergePartialSchemas(p: Parameters, partials: Seq[JsObject]): (JsObject, Seq[Schema], SchemaReferenceResolver) = {
+
+    if (p.debug.enabled && p.debug.traceReadingProgress) {
+      println(
+        s"M ${p.debug.curIndent("=")} merging ${partials.size} partials allOf@${SchemaReferenceResolver.pathToReference(
+          p.path)}")
+    }
 
     val (aggregatedJson, definitions, resolvers) = partials.zipWithIndex
       .map {
@@ -1086,12 +1105,6 @@ object SchemaReader {
       .reduce { (l, r) =>
         (JsonUtils.deepMerge(l._1, r._1).as[JsObject], l._2 ++ r._2, l._3 ++ r._3)
       }
-
-    if (p.debug.enabled && p.debug.traceReadingProgress) {
-      println(
-        s"M ${p.debug.curIndent("=")} merging ${partials.size} partials allOf@${SchemaReferenceResolver.pathToReference(
-          p.path)}")
-    }
 
     if (p.debug.showJsonAfterAggregatingPartials) {
       p.debug

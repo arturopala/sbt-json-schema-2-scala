@@ -5,7 +5,8 @@ case class DebugOptions(
   traceReadingProgress: Boolean = false,
   showJsonAfterAggregatingPartials: Boolean = false,
   showJsonAfterEmbeddingPropertiesIntoVariants: Boolean = false,
-  showJsonAfterMergingWithAdditionalProperties: Boolean = false) {
+  showJsonAfterMergingWithAdditionalProperties: Boolean = false,
+  showJsonAfterInliningConditionals: Boolean = false) {
 
   def show(header: String, content: String): Unit =
     if (enabled) {

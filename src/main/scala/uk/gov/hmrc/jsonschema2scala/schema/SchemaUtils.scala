@@ -76,12 +76,13 @@ object SchemaUtils {
           case (referencedSchema: JsObject, resolver) =>
             val dereferenced = dereferenceOneLevelOfSchema(referencedSchema, path, resolver)
             val retrofitted = replacePropertiesSchemaWithReferenceUsingBase(dereferenced, uri.toString)
-            Some(JsonUtils.deepMerge(schemaJson.-("$ref"), retrofitted).as[JsObject])
+            val resolved = deepResolveReferences(retrofitted, resolver)
+            Some(JsonUtils.deepMerge(schemaJson.-("$ref"), resolved).as[JsObject])
 
           case _ => None
         }
       }
-      .getOrElse(schemaJson.-("$ref"))
+      .getOrElse(schemaJson)
 
   /**
     * Rebase all nested references to the current base.
