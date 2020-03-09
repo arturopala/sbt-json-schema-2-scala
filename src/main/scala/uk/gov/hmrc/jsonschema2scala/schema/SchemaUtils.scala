@@ -119,7 +119,7 @@ object SchemaUtils {
     */
   def deepResolveReferences(schemaJson: JsObject, referenceResolverCandidate: SchemaReferenceResolver): JsObject = {
     val referenceResolver: SchemaReferenceResolver =
-      schemaReferenceResolverFor(schemaJson, "", referenceResolverCandidate)
+      schemaReferenceResolverFor(schemaJson, referenceResolverCandidate)
 
     transformObjectFields(schemaJson) {
       case ("$ref", JsString(reference)) =>
@@ -140,15 +140,17 @@ object SchemaUtils {
 
   final def encodeForUri(s: String): String = URLEncoder.encode(s, "utf-8")
 
-  def replacePropertiesSchemaWithReferenceUsingBase(schemaJson: JsObject, baseReference: String): JsObject =
+  def replacePropertiesSchemaWithReferenceUsingBase(schemaJson: JsObject, baseReference: String): JsObject = {
+    val baseUri = if (baseReference.contains('#')) baseReference else baseReference + "#"
     JsonUtils.transformObjectFields(schemaJson) {
       case (key, jsObject: JsObject) if key == "properties" || key == "patternProperties" =>
         (key, JsonUtils.transformObjectFields(jsObject) {
           case (name, _: JsObject) =>
-            val uri = s"$baseReference/${encodeForUri(key)}/${encodeForUri(name)}"
+            val uri = s"$baseUri/${encodeForUri(key)}/${encodeForUri(name)}"
             (name, JsObject(Map("$ref" -> JsString(uri))))
         })
     }
+  }
 
   def replacePropertiesSchemaWithReferenceUsingMap(
     schemaJson: JsObject,
@@ -165,7 +167,7 @@ object SchemaUtils {
   def collectSchemaReferenceResolvers(
     json: JsObject,
     referenceResolverCandidate: SchemaReferenceResolver): Seq[SchemaReferenceResolver] = {
-    val referenceResolver: SchemaReferenceResolver = schemaReferenceResolverFor(json, "", referenceResolverCandidate)
+    val referenceResolver: SchemaReferenceResolver = schemaReferenceResolverFor(json, referenceResolverCandidate)
 
     val resolvers = Seq(referenceResolver) ++ visitObjectFields(json) {
       case (Vocabulary.holdsJsonObject(_), jsObject: JsObject) =>
@@ -184,13 +186,12 @@ object SchemaUtils {
 
   def schemaReferenceResolverFor(
     json: JsObject,
-    schemaName: String,
     referenceResolverCandidate: SchemaReferenceResolver): SchemaReferenceResolver =
     SchemaReader
       .attemptReadId(json)
       .map { uri =>
         val uri2 = if (uri.isAbsolute) uri else referenceResolverCandidate.resolveUri(uri)
-        SchemaReferenceResolver(uri2, schemaName, json, Some(referenceResolverCandidate))
+        SchemaReferenceResolver(uri2, json, Some(referenceResolverCandidate))
       }
       .getOrElse(referenceResolverCandidate)
 
@@ -218,6 +219,26 @@ object SchemaUtils {
     case o: OneOfAnyOfSchema if o.variants.size == 1 => isEffectiveArraySchema(o.variants.head)
     case a: AllOfSchema                              => isEffectiveArraySchema(a.aggregatedSchema)
     case _                                           => false
+  }
+
+  def isPossiblyObjectSchema: Schema => Boolean = {
+    case _: ObjectSchema            => true
+    case _: OneOfAnyOfSchema        => true
+    case _: AllOfSchema             => true
+    case a: ArraySchema             => a.items.exists(_.exists(isPossiblyObjectSchema))
+    case i: InternalSchemaReference => isPossiblyObjectSchema(i.schema)
+    case e: ExternalSchemaReference => isPossiblyObjectSchema(e.schema)
+    case _                          => false
+  }
+
+  def possibleObjectSchemas: Schema => Seq[Schema] = {
+    case o: ObjectSchema            => Seq(o)
+    case o: OneOfAnyOfSchema        => Seq(o)
+    case a: AllOfSchema             => Seq(a)
+    case a: ArraySchema             => a.items.map(_.flatMap(possibleObjectSchemas)).getOrElse(Seq.empty)
+    case i: InternalSchemaReference => possibleObjectSchemas(i.schema)
+    case e: ExternalSchemaReference => possibleObjectSchemas(e.schema)
+    case _                          => Seq.empty
   }
 
   def referencedSchemaOption: Schema => Option[Schema] = {

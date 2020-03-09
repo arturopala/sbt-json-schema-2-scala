@@ -18,8 +18,9 @@ object ScalaNameProvider extends NameProvider {
     maybeWrapInBackticks(name, suffix)
 
   final def maybeWrapInBackticks(name: String, suffix: String): String = {
-    val n = if (objectMemberNames.contains(name + suffix)) "_" + name else name
-    if (name.exists(hashEnablingCharacters.contains)) "$" + SHA256.hashOf(name, 3)
+    val n = if (objectMemberNames.contains(name + suffix) || basicTypes.contains(name + suffix)) name + "$" else name
+    if (n.isEmpty) "$empty" + suffix
+    else if (name.exists(hashEnablingCharacters.contains)) "Pattern_" + SHA256.hashOf(name, 3)
     else if (n.exists(c => !Character.isJavaIdentifierPart(c)) ||
              !Character.isJavaIdentifierStart(n.charAt(0)) ||
              scalaKeywords.contains(n)) {
@@ -77,6 +78,9 @@ object ScalaNameProvider extends NameProvider {
 
   final val objectMemberNames: Seq[String] =
     Seq("wait", "notify", "notifyAll", "finalize", "equals", "finalize", "clone", "hashCode")
+
+  final val basicTypes: Seq[String] =
+    Seq("Any", "AnyVal", "AnyRef", "Object", "Int", "Boolean", "Double", "Nothing", "String", "BigDecimal")
 
   final val hashEnablingCharacters: Set[Char] = Set('^', '\\', '[', ']', '(', ')', '?', '+', '*')
 

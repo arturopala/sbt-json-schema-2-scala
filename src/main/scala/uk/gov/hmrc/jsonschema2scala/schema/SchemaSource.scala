@@ -53,7 +53,9 @@ object SchemaSource {
 
 }
 
-case class SchemaSourceJsonWithUri(name: String, uri: URI, json: JsObject) extends SchemaSource
+case class SchemaSourceJsonWithUri(uri: URI, json: JsObject) extends SchemaSource {
+  override def name: String = uri.getPath
+}
 
 case class SchemaSourceJson(name: String, json: JsObject) extends SchemaSource with SchemaUriReader
 

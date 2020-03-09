@@ -18,99 +18,127 @@ package uk.gov.hmrc.jsonschema2scala.typer
 
 import uk.gov.hmrc.jsonschema2scala.schema._
 import uk.gov.hmrc.jsonschema2scala.utils.NameUtils
+import uk.gov.hmrc.jsonschema2scala.utils.TupleOps.PairExtensions
+
+import scala.annotation.tailrec
 
 object TypeDefinitionsBuilder {
 
   def buildFrom(schema: Schema)(implicit nameProvider: NameProvider): Either[List[String], TypeDefinition] = {
 
     val name = NameUtils.normalizedFirstUppercase(schema.name)
-    val types = TypeDefinitionsBuilder
-      .processSchema(name, Nil, schema)
-      .map { definition =>
-        definition.copy(externalImports = TypeDefinitionsBuilder.calculateExternalImports(definition.schema))
-      }
-      .distinct
 
-    if (types.isEmpty) Left(s"Schema ${schema.uri} is not a valid type definition" :: Nil)
-    else if (types.size == 1) Right(types.head)
-    else {
-      types.find(_.name == name) match {
+    val (types, context) =
+      TypeDefinitionsBuilder
+        .processSchema(name, Nil, schema, Context())
+        .mapFirst(_.map { definition =>
+          definition.copy(externalImports = TypeDefinitionsBuilder.calculateExternalImports(definition.schema))
+        }.distinct)
 
-        case Some(typeDef) => {
+    (if (types.isEmpty) Left(s"Schema ${schema.uri} is not a valid type definition" :: Nil)
+     else if (types.size == 1) {
+       Right(types.head)
+     } else {
+       types.find(_.name == name) match {
 
-          val movingTypes: Seq[TypeDefinition] = types
-            .filterNot(_ == typeDef)
-            .map(TypeDefinition.modifyPath(prependNameIfMissing(typeDef.name)))
+         case Some(typeDef) => {
 
-          Right(
-            typeDef
-              .copy(nestedTypes = typeDef.nestedTypes ++ movingTypes))
+           val movingTypes: Seq[TypeDefinition] = types
+             .filterNot(_ == typeDef)
+             .map(TypeDefinition.modifyPath(prependNameIfMissing(typeDef.name)))
+
+           Right(
+             typeDef
+               .copy(nestedTypes = typeDef.nestedTypes ++ movingTypes))
+         }
+
+         case None =>
+           Right(
+             TypeDefinition(
+               name,
+               Nil,
+               ObjectSchema(
+                 attributes = SchemaAttributes(
+                   name = schema.name,
+                   path = schema.path,
+                   description = schema.description,
+                   required = schema.required,
+                   custom = None)),
+               nestedTypes = types
+             ))
+       }
+     })
+      .map(processRemainingSchema(_, context))
+  }
+
+  def processSchema(name: String, path: List[String], schema: Schema, context: Context)(
+    implicit nameProvider: NameProvider): (Seq[TypeDefinition], Context) =
+    context.getTypeDefinition(schema.uriDecoded) match {
+      case Some(Right(_)) => (Seq.empty, context)
+      case other =>
+        def withTemplates(body: Context => (Seq[TypeDefinition], Context)): (Seq[TypeDefinition], Context) = {
+          val (templates, context2) = processTemplates(path, schema, context)
+          body(context2).mapFirst(templates ++ _)
         }
 
-        case None =>
-          Right(
-            TypeDefinition(
-              name,
-              Nil,
-              ObjectSchema(
-                attributes = SchemaAttributes(
-                  name = schema.name,
-                  path = schema.path,
-                  description = schema.description,
-                  required = schema.required,
-                  custom = None)),
-              nestedTypes = types
-            ))
-      }
+        val (types: Seq[TypeDefinition], context2: Context) = schema match {
+          case objectSchema: ObjectSchema =>
+            processObjectSchema(name, path, objectSchema, context)
+
+          case oneOfSchema: OneOfAnyOfSchema =>
+            withTemplates(processOneOfAnyOfSchema(name, path, oneOfSchema, _))
+
+          case allOfSchema: AllOfSchema =>
+            withTemplates(processAllOfSchema(name, path, allOfSchema, _))
+
+          case notSchema: NotSchema =>
+            withTemplates(processSchema(name, path, notSchema.schema, _))
+
+          case arraySchema: ArraySchema =>
+            withTemplates(processArraySchema(name, path, arraySchema, _))
+
+          case schemaReference: InternalSchemaReference =>
+            processTemplates(
+              path,
+              schema,
+              if (SchemaUtils.isPossiblyObjectSchema(schemaReference.schema)) {
+                val schemas =
+                  SchemaUtils.possibleObjectSchemas(schemaReference.schema)
+                schemas.foldLeft(context)(_.addReference(_))
+              } else context
+            )
+
+          case schemaStub: SchemaStub =>
+            other match {
+              case None => withTemplates(processSchema(name, path, schemaStub.resolved, _))
+              case _    => (Seq.empty, context)
+            }
+
+          case _ =>
+            processTemplates(path, schema, context)
+        }
+
+        val result = sortByName(avoidNameCollisions(types, ""))
+        (result, context2.addTypeDefinitions(result))
     }
-  }
 
-  def processSchema(name: String, path: List[String], schema: Schema)(
-    implicit nameProvider: NameProvider): Seq[TypeDefinition] = {
-
-    lazy val templates: Seq[TypeDefinition] =
-      processTemplates(path, schema)
-
-    val types: Seq[TypeDefinition] = schema match {
-      case objectSchema: ObjectSchema    => processObjectSchema(name, path, objectSchema)
-      case oneOfSchema: OneOfAnyOfSchema => templates ++ processOneOfAnyOfSchema(name, path, oneOfSchema)
-      case allOfSchema: AllOfSchema      => templates ++ processAllOfSchema(name, path, allOfSchema)
-      case notSchema: NotSchema          => templates ++ processSchema(name, path, notSchema.schema)
-      case arraySchema: ArraySchema      => templates ++ processArraySchema(name, path, arraySchema)
-      case _                             => templates
+  def processTemplates(path: List[String], schema: Schema, context: Context)(
+    implicit nameProvider: NameProvider): (Seq[TypeDefinition], Context) =
+    traverse(schema.definitions, context) { (s, c) =>
+      val childTypeName = nameProvider.toTypeName(s)
+      processSchema(childTypeName, path, s, c)
     }
 
-    sortByName(avoidNameCollisions(types, ""))
-  }
-
-  def processInternalSchemaReference(name: String, path: List[String], schema: Schema)(
-    implicit nameProvider: NameProvider): Seq[TypeDefinition] = schema match {
-
-    case internalReference: InternalSchemaReference =>
-      processSchema(nameProvider.toTypeName(internalReference.schema), Nil, internalReference.schema)
-        .map(_.copy(forReferenceOnly = true))
-
-    case _ => Seq.empty
-  }
-
-  def processTemplates(path: List[String], schema: Schema)(implicit nameProvider: NameProvider): Seq[TypeDefinition] =
-    schema.definitions
-      .flatMap { schema =>
-        val childTypeName = nameProvider.toTypeName(schema)
-        processSchema(childTypeName, path, schema)
-      }
-      .sortBy(_.name)
-
-  def processObjectSchema(name: String, path: List[String], objectSchema: ObjectSchema)(
-    implicit nameProvider: NameProvider): Seq[TypeDefinition] =
-    if (objectSchema.isEmpty) Seq.empty
+  def processObjectSchema(name: String, path: List[String], objectSchema: ObjectSchema, context: Context)(
+    implicit nameProvider: NameProvider): (Seq[TypeDefinition], Context) =
+    if (objectSchema.isEmpty) (Seq.empty, context)
     else {
 
       val typeName = {
         if (objectSchema.namedProperties.exists(_.name == name)) s"_$name" else name
       }
 
-      val templates: Seq[TypeDefinition] = processTemplates(typeName :: path, objectSchema)
+      val (templates, context2) = processTemplates(typeName :: path, objectSchema, context)
 
       val properties: Seq[Schema] = objectSchema.namedProperties ++
         objectSchema.patternProperties.getOrElse(Seq.empty) ++
@@ -121,31 +149,34 @@ object TypeDefinitionsBuilder {
 
       if (path.nonEmpty && (objectSchema.isEmpty || objectSchema.hasSingleCollectiveFieldOnly)) {
 
-        properties.flatMap { schema =>
-          val childTypeName = nameProvider.toTypeName(schema)
-          processSchema(childTypeName, path, schema)
+        traverse(properties, context2) { (s, c) =>
+          val childTypeName = nameProvider.toTypeName(s)
+          processSchema(childTypeName, path, s, c)
         }
 
       } else {
-        val nestedTypeDefinitions: Seq[TypeDefinition] =
-          properties.flatMap { schema =>
-            val childTypeName = nameProvider.toTypeName(schema)
-            processSchema(childTypeName, name :: path, schema)
+
+        val (nestedTypeDefinitions, context3) =
+          traverse(properties, context2) { (s, c) =>
+            val childTypeName = nameProvider.toTypeName(s)
+            processSchema(childTypeName, name :: path, s, c)
           }
 
-        Seq(
-          TypeDefinition(
-            name = typeName,
-            path = path,
-            schema = objectSchema,
-            nestedTypes = sortByName(avoidNameCollisions(templates ++ nestedTypeDefinitions, typeName)),
-            collectiveFieldsAggregated = collectiveFieldsAggregated
-          ))
+        (
+          Seq(
+            TypeDefinition(
+              name = typeName,
+              path = path,
+              schema = objectSchema,
+              nestedTypes = sortByName(avoidNameCollisions(templates ++ nestedTypeDefinitions, typeName)),
+              collectiveFieldsAggregated = collectiveFieldsAggregated
+            )),
+          context3)
       }
     }
 
-  def processOneOfAnyOfSchema(name: String, path: List[String], oneOfSchema: OneOfAnyOfSchema)(
-    implicit nameProvider: NameProvider): Seq[TypeDefinition] = {
+  def processOneOfAnyOfSchema(name: String, path: List[String], oneOfSchema: OneOfAnyOfSchema, context: Context)(
+    implicit nameProvider: NameProvider): (Seq[TypeDefinition], Context) = {
 
     val nonPrimitives: Seq[Schema] = oneOfSchema.variants.filterNot(_.primitive)
     val oneOfTypeName = nameProvider.toTypeName(oneOfSchema)
@@ -154,48 +185,58 @@ object TypeDefinitionsBuilder {
 
     var pos = 0
 
-    val arrayTypeDefinitions = arrays.flatMap { schema =>
+    val (arrayTypeDefinitions, context2) = traverse(arrays, context) { (s, c) =>
       val nameVariant =
         if (nonPrimitives.size == 1) name
         else {
           pos = pos + 1
           nameProvider.combine(name, s"_$pos")
         }
-      processSchema(nameVariant, path, schema) /*++
-        processInternalSchemaReference(name, path, schema)*/
+      processSchema(nameVariant, path, s, c)
     }
 
-    val nonArrayTypeDefinitions = nonArrays.size match {
-      case 0 => Seq.empty
-      case 1 =>
-        processSchema(name, path, nonArrays.head)
+    val (nonArrayTypeDefinitions, context4) = nonArrays.size match {
+
+      case 0 => (Seq.empty, context2)
+
+      case 1 => processSchema(name, path, nonArrays.head, context2)
 
       case many =>
-        val directSubtypes = avoidNameCollisions(
-          nonArrays.flatMap { schema =>
-            val nameVariant = {
-              pos = pos + 1
-              nameProvider.combine(name, s"_$pos")
-            }
-            processSchema(nameVariant, name :: path, schema) /* ++
-                  processInternalSchemaReference(name, name :: path, schema)*/
-          },
-          oneOfTypeName
-        )
-
-        val referencedSubtypes = nonArrays
-          .flatMap { schema =>
-            processInternalSchemaReference(name, name :: path, schema)
+        val (directSubtypes, context3) = traverse(nonArrays, context2) { (s, c) =>
+          val nameVariant = {
+            pos = pos + 1
+            nameProvider.combine(name, s"_$pos")
           }
+          processSchema(nameVariant, name :: path, s, c)
+        }.mapFirst(avoidNameCollisions(_, oneOfTypeName))
 
-        val subtypes = directSubtypes ++ referencedSubtypes
+        val referencedSubtypesSchema: Seq[Schema] = nonArrays.flatMap {
+          case internalReference: InternalSchemaReference =>
+            context3.getTypeDefinition(internalReference.reference) match {
 
-        subtypes.size match {
+              case Some(Right(typeDef)) => Seq(typeDef.schema)
+
+              case Some(Left(schema)) => Seq(schema)
+
+              case None =>
+                processSchema(
+                  nameProvider.toTypeName(internalReference.schema),
+                  Nil,
+                  internalReference.schema,
+                  context3)._1.map(_.schema)
+            }
+
+          case _ => Seq.empty
+        }
+
+        val subtypesSchemas = directSubtypes.map(_.schema) ++ referencedSubtypesSchema
+
+        val types: Seq[TypeDefinition] = directSubtypes.size match {
           case 0 => Seq.empty
           case 1 =>
             Seq(
               TypeDefinition
-                .modifyPath(safeTail)(subtypes.head)
+                .modifyPath(safeTail)(directSubtypes.head)
                 .copy(name = name))
 
           case _ =>
@@ -211,29 +252,32 @@ object TypeDefinitionsBuilder {
                   required = oneOfSchema.required,
                   custom = None)),
               isInterface = true,
-              subtypes = subtypes.map(_.schema),
+              subtypes = subtypesSchemas,
               nestedTypes = directSubtypes
             )
 
             Seq(superType)
         }
+
+        (types, context3)
     }
 
-    nonArrayTypeDefinitions ++ arrayTypeDefinitions
+    (nonArrayTypeDefinitions ++ arrayTypeDefinitions, context4)
   }
 
-  def processAllOfSchema(name: String, path: List[String], allOfSchema: AllOfSchema)(
-    implicit nameProvider: NameProvider): Seq[TypeDefinition] = {
+  def processAllOfSchema(name: String, path: List[String], allOfSchema: AllOfSchema, context: Context)(
+    implicit nameProvider: NameProvider): (Seq[TypeDefinition], Context) = {
 
-    val templates = allOfSchema.partials.flatMap(processTemplates(name :: path, _))
+    val (templates, context2) = traverse(allOfSchema.partials, context)((s, c) => processTemplates(name :: path, s, c))
 
-    templates ++ processSchema(name, path, allOfSchema.aggregatedSchema)
+    processSchema(name, path, allOfSchema.aggregatedSchema, context2)
+      .mapFirst(templates ++ _)
   }
 
-  def processArraySchema(name: String, path: List[String], arraySchema: ArraySchema)(
-    implicit nameProvider: NameProvider): Seq[TypeDefinition] =
-    arraySchema.items.toSeq
-      .flatMap(_.flatMap(item => processSchema(nameProvider.toTypeName(item), path, item)))
+  def processArraySchema(name: String, path: List[String], arraySchema: ArraySchema, context: Context)(
+    implicit nameProvider: NameProvider): (Seq[TypeDefinition], Context) =
+    traverse(arraySchema.items.getOrElse(Seq.empty), context)((s, c) =>
+      processSchema(nameProvider.toTypeName(s), path, s, c))
 
   def calculateExternalImports(schema: ObjectSchema)(implicit nameProvider: NameProvider): Set[String] =
     schema.properties.flatMap {
@@ -337,5 +381,46 @@ object TypeDefinitionsBuilder {
       }
       ._2
       .sortBy(_.fieldName)
+  }
+
+  def traverse(schemas: Seq[Schema], context: Context)(
+    f: (Schema, Context) => (Seq[TypeDefinition], Context)): (Seq[TypeDefinition], Context) =
+    schemas.foldLeft((Seq.empty[TypeDefinition], context)) {
+      case ((definitions, c), schema) =>
+        val (definitions2, c2) = f(schema, c)
+        (definitions ++ definitions2, c2)
+    }
+
+  @tailrec
+  def processRemainingSchema(typeDef: TypeDefinition, context: Context)(
+    implicit nameProvider: NameProvider): TypeDefinition = {
+    val unresolvedSchema: Seq[Schema] = context.remainingSchema
+    if (unresolvedSchema.nonEmpty) {
+      val (types2, context2) = traverse(unresolvedSchema, context) { (s, c) =>
+        processSchema(nameProvider.toTypeName(s), typeDef.name :: typeDef.path, s, c)
+      }
+      val typeDef2 = typeDef.copy(nestedTypes = typeDef.nestedTypes ++ types2)
+      if (types2.nonEmpty) processRemainingSchema(typeDef2, context2)
+      else typeDef2
+    } else typeDef
+  }
+
+  case class Context(private val definitions: Map[String, Either[Schema, TypeDefinition]] = Map.empty) {
+
+    def getTypeDefinition(uri: String): Option[Either[Schema, TypeDefinition]] =
+      definitions.get(uri)
+
+    def addTypeDefinitions(typeDefs: Seq[TypeDefinition]): Context = {
+      val definitions2 =
+        typeDefs.foldLeft(definitions)((acc, typeDef) => acc.updated(typeDef.schema.uriDecoded, Right(typeDef)))
+      this.copy(definitions = definitions2)
+    }
+
+    def addReference(schema: Schema): Context =
+      if (definitions.get(schema.uriDecoded).flatMap(_.toOption).isDefined) this
+      else this.copy(definitions = definitions.updated(schema.uriDecoded, Left(schema)))
+
+    def remainingSchema: Seq[Schema] =
+      definitions.collect { case (_, Left(schema)) => schema }.toSeq
   }
 }

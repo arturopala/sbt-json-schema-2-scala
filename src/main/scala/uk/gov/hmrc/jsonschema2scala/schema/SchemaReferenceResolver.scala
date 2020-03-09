@@ -47,7 +47,6 @@ object SchemaReferenceResolver {
 
   def apply(
     schemaUri: URI,
-    schemaName: String,
     schemaJson: JsObject,
     upstreamResolver: Option[SchemaReferenceResolver]): SchemaReferenceResolver =
     upstreamResolver match {
@@ -55,8 +54,8 @@ object SchemaReferenceResolver {
         resolver
 
       case _ =>
-        val schemaSource = SchemaSourceJsonWithUri(schemaName, schemaUri, schemaJson)
-        new CachingReferenceResolver(schemaSource, upstreamResolver)
+        val schemaSource = SchemaSourceJsonWithUri(schemaUri, schemaJson)
+        CachingReferenceResolver(schemaSource, upstreamResolver)
     }
 
   def apply(schemaSource: SchemaSource, upstreamResolver: Option[SchemaReferenceResolver]): SchemaReferenceResolver =
@@ -65,7 +64,7 @@ object SchemaReferenceResolver {
         resolver
 
       case _ =>
-        new CachingReferenceResolver(schemaSource, upstreamResolver)
+        CachingReferenceResolver(schemaSource, upstreamResolver)
     }
 
   def apply(
@@ -75,7 +74,7 @@ object SchemaReferenceResolver {
     val resolvers: Seq[SchemaReferenceResolver] =
       schemaSources.map(SchemaReferenceResolver(_, None))
 
-    new MultiReferenceResolver(resolvers, false, upstreamResolver)
+    MultiReferenceResolver(resolvers, internal = false, upstreamResolver)
   }
 
   def apply(schemaSource: SchemaSource, allSchemaSources: Seq[SchemaSource]): SchemaReferenceResolver =
@@ -87,7 +86,7 @@ object SchemaReferenceResolver {
   def apply(resolvers: Seq[SchemaReferenceResolver]): SchemaReferenceResolver = {
     val r: Seq[SchemaReferenceResolver] = resolvers.distinct
     if (r.size > 1)
-      new MultiReferenceResolver(r, internal = true, upstreamResolver = None)
+      MultiReferenceResolver(r, internal = true, upstreamResolver = None)
     else
       r.headOption.getOrElse(throw new IllegalStateException("Expected non empty list of resolvers"))
   }
@@ -212,7 +211,7 @@ final case class CachingReferenceResolver(schemaSource: SchemaSource, upstreamRe
 
     def readSchema(jsObject: JsObject, name: String, reader: SchemaReader): Schema = {
       // prevent cycles by caching a schema stub
-      val stub = SchemaStub(reader(name, emptyJsObject, this, Some(false)), absolute)
+      val stub = SchemaStub(reader(name, emptyJsObject, this, Some(false)), absolute, this)
       cache.update(absolute, stub)
 
       val schema: Schema = reader(name, jsObject, this, None)

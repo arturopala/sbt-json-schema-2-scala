@@ -53,12 +53,12 @@ object TypeDefinition {
 
   def listSchemaUriToTypePath(typeDef: TypeDefinition, excludeReferences: Boolean): Seq[(String, List[String])] =
     (if (excludeReferences && typeDef.forReferenceOnly) Seq.empty
-     else Seq((typeDef.schema.uri, typeDef.name :: typeDef.path))) ++
+     else Seq((typeDef.schema.uriDecoded, typeDef.name :: typeDef.path))) ++
       typeDef.nestedTypes.flatMap(listSchemaUriToTypePath(_, excludeReferences))
 
   def listSchemaUriToTypeInterfaces(typeDef: TypeDefinition): Seq[(String, Seq[Schema])] =
     (if (typeDef.isInterface)
-       typeDef.subtypes.map(s => (s.uri, Seq(typeDef.schema)))
+       typeDef.subtypes.map(s => (s.uriDecoded, Seq(typeDef.schema)))
      else Seq.empty) ++ typeDef.nestedTypes.flatMap(listSchemaUriToTypeInterfaces)
 
 }

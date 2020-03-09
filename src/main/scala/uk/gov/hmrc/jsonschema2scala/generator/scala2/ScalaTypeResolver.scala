@@ -16,8 +16,6 @@
 
 package uk.gov.hmrc.jsonschema2scala.generator.scala2
 
-import java.net.URI
-
 import uk.gov.hmrc.jsonschema2scala.generator.TypeResolver
 import uk.gov.hmrc.jsonschema2scala.schema._
 import uk.gov.hmrc.jsonschema2scala.typer.TypeDefinition
@@ -146,13 +144,9 @@ class ScalaTypeResolver(
         }
 
       case schemaStub: SchemaStub =>
-        val uri = URI.create(schemaStub.reference)
-        schemaReferenceResolver
-          .lookupSchema(uri, None)
-          .map(_._1)
-          .map(typeOf(_, viewpoint, wrapAsOption = false))
-          .getOrElse(throw new IllegalStateException(
-            s"Resolving type of schema stub reference ${schemaStub.reference}, but the type definition unknown."))
+        schemaTypeNameAsSeenFrom(schemaStub.reference, viewpoint).getOrElse {
+          typeOf(schema.resolved, viewpoint, wrapAsOption = false)
+        }
 
     }
 
@@ -171,7 +165,7 @@ class ScalaTypeResolver(
       .getOrElse(Set.empty)
 
   def schemaTypeNameAsSeenFrom(schema: Schema, viewpoint: TypeDefinition): Option[String] =
-    schemaTypeNameAsSeenFrom(schema.uri, viewpoint)
+    schemaTypeNameAsSeenFrom(schema.uriDecoded, viewpoint)
 
   def schemaTypeNameAsSeenFrom(uri: String, viewpoint: TypeDefinition): Option[String] =
     schemaUriToTypePath

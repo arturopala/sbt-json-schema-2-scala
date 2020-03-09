@@ -263,7 +263,13 @@ trait TestSchemas {
     "prometheus.rules.json",
     "proxies.json",
     "ui5-manifest.json",
-    "chrome-manifest.json"
+    "circleciconfig.json",
+    "compilerconfig.json",
+    "chrome-manifest.json",
+    "travis.json",
+    "opspec-io-0.1.7.json",
+    "hemtt-0.6.2.json",
+    "vega.json"
     //"ansible-stable-2.1.json",
     //"ansible-stable-2.2.json"
   )
@@ -275,18 +281,12 @@ trait TestSchemas {
     //"ansible-stable-2.6.json",
     //"ansible-stable-2.7.json",
     "licenses.1.json",
-    "circleciconfig.json",
-    "compilerconfig.json",
-    "hemtt-0.6.2.json",
     "lsdlschema.json",
-    "opspec-io-0.1.7.json",
     "phraseapp.json",
     "schema-org-action.json",
     "schema-org-contact-point.json",
     "schema-org-place.json",
     "schema-org-thing.json",
-    "stylelintrc.json",
-    "travis.json",
-    "vega.json"
+    "stylelintrc.json"
   )
 }

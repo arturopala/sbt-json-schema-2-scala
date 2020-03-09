@@ -50,7 +50,8 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
     schemaResolver: SchemaReferenceResolver): TypeResolver =
     buildTypeDefinitions(schema, externalTypeResolvers).fold(
       errors =>
-        throw new IllegalStateException(s"Error(s) when resolving types for ${schema.uri}: ${errors.mkString(", ")}"),
+        throw new IllegalStateException(
+          s"Error(s) when resolving types for ${schema.uriDecoded}: ${errors.mkString(", ")}"),
       _._2
     )
 
@@ -195,8 +196,7 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
             members = generateInterfaceMethods(findCommonFields(typeDef.subtypes, typeDef)),
             modifier = Some("sealed"),
             comment = Some(
-              s"${typeDef.schema.description.map(d => s"$d\n").getOrElse("")}${implementingTypesComment}Schema: ${SchemaReferenceResolver
-                .decodeFromUri(typeDef.schema.uri)}")
+              s"${typeDef.schema.description.map(d => s"$d\n").getOrElse("")}${implementingTypesComment}Schema: ${typeDef.schema.uriDecoded}")
           ))
       } else {
         val parameters = classOrdinaryFields ++ classCollectiveFields /*++ (if (isTopLevel && context.renderGenerators)
@@ -211,8 +211,8 @@ object ScalaCodeGenerator extends CodeGenerator with KnownFieldGenerators {
               parameters = parameters,
               supertypes = (if (isTopLevel && context.renderGenerators) Seq("Record") else Seq.empty) ++ interfaceList,
               members = if (context.renderBuilders) generateBuilderMethods(typeDef) else Seq.empty,
-              comment =
-                Some(s"${typeDef.schema.description.map(d => s"$d\n").getOrElse("")}Schema: ${typeDef.schema.uri}")
+              comment = Some(
+                s"${typeDef.schema.description.map(d => s"$d\n").getOrElse("")}Schema: ${typeDef.schema.uriDecoded}")
             ))
         } else None
       }

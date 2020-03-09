@@ -77,7 +77,7 @@ object SchemaReader {
 
     val required = p0.requiredFields.contains(p0.name)
 
-    val description: Option[String] = p0.description.orElse(attemptReadDescription(p0.json))
+    val description: Option[String] = attemptReadDescription(p0.json).orElse(p0.description)
 
     val customFields: Option[Map[String, JsValue]] = {
       val set = Vocabulary.keywordsNotInVocabulary(p0.json.fields)
@@ -213,8 +213,7 @@ object SchemaReader {
 
   def wrapVariantsAsSchema(p: Parameters, variants: Seq[Schema]): Option[Schema] = {
 
-    val filteredVariants = variants.distinct
-    val (explodedVariants, definitions) = explodeOneOfAnyOfVariants(filteredVariants)
+    val (explodedVariants, definitions) = explodeOneOfAnyOfVariants(variants)
 
     explodedVariants match {
       case isEmpty()       => None
@@ -274,12 +273,12 @@ object SchemaReader {
                 .flatMap(uri =>
                   resolver.lookupSchema(
                     uri,
-                    Some((name, jsObject, resolver, enableDebug) =>
+                    Some((name, jsObject, resolver2, enableDebug) =>
                       readSchema(p.copy(
                         name = name,
                         path = Nil,
                         json = jsObject,
-                        referenceResolver = resolver,
+                        referenceResolver = resolver2,
                         description = None,
                         requiredFields = Seq.empty,
                         processDefinitions = true,
@@ -817,9 +816,7 @@ object SchemaReader {
     attemptReadId(p.json)
       .map { uri =>
         val uri2 = if (uri.isAbsolute) uri else p.referenceResolver.resolveUri(uri)
-        (
-          SchemaReferenceResolver(uri2, p.name, p.json, Some(p.referenceResolver)),
-          SchemaReferenceResolver.rootPath(uri))
+        (SchemaReferenceResolver(uri2, p.json, Some(p.referenceResolver)), SchemaReferenceResolver.rootPath(uri))
       }
       .getOrElse((p.referenceResolver, p.path))
 
@@ -887,9 +884,11 @@ object SchemaReader {
 
       val modifiedJson = preservedJson + (conditionalKeyword -> JsArray(variants.zipWithIndex.map {
         case (variant, index) =>
-          val dereferencedVariant =
+          val dereferencedVariantJson =
             SchemaUtils.dereferenceOneLevelOfSchema(variant, index.toString :: p.path, p.referenceResolver)
-          JsonUtils.deepMerge(relocatingPrunedJson, dereferencedVariant)
+          val prunedVariantJson =
+            JsonUtils.filterObjectFields(dereferencedVariantJson)(key => !Vocabulary.metaCoreVocabulary.contains(key))
+          JsonUtils.deepMerge(relocatingPrunedJson, prunedVariantJson)
       }))
 
       if (p.debug.showJsonAfterEmbeddingPropertiesIntoVariants) {

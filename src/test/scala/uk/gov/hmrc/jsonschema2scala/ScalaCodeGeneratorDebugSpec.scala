@@ -51,7 +51,7 @@ class ScalaCodeGeneratorDebugSpec
 
   override def afterAll(): Unit = compiler.cleanup()
 
-  val schemaToDebug: Set[String] = Set("vega.json")
+  val schemaToDebug: Set[String] = Set("schema-org-action.json")
 
   "Generate from selected schemas" should {
     allSchemas

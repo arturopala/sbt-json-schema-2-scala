@@ -16,14 +16,18 @@
 
 package uk.gov.hmrc.jsonschema2scala.schema
 
+import java.net.{URI, URLDecoder}
+
 import play.api.libs.json.{JsValue, Reads}
 
 sealed trait Schema {
 
   final def name: String = attributes.name
   final def path: List[String] = attributes.path
-  final def description: Option[String] = attributes.description
   final def definitions: Seq[Schema] = attributes.definitions
+  final def description: Option[String] =
+    attributes.description
+      .orElse(resolved.attributes.description)
 
   final def custom[T: Reads](key: String): Option[T] =
     for {
@@ -39,14 +43,18 @@ sealed trait Schema {
 
   val primitive: Boolean
   val validated: Boolean
-
   val boolean: Boolean = false
+
   def required: Boolean = attributes.required
 
   val uri: String = {
     val normalizedPath = if (path.nonEmpty && (path.head == "not")) path.tail else path
     SchemaReferenceResolver.pathToReference(normalizedPath)
   }
+
+  def uriDecoded: String = URLDecoder.decode(uri, "utf-8")
+
+  lazy val resolved: Schema = this
 
   def addDefinitions(definitions: Seq[Schema]): Schema =
     SchemaUtils.copyAttributes(this, attributes.copy(definitions = (attributes.definitions ++ definitions).distinct))
@@ -229,7 +237,9 @@ case class ObjectSchema(
 
   override def toString: String =
     super.toString + (if (namedProperties.nonEmpty)
-                        namedProperties.map(s => s"$name:${s.getClass.getSimpleName}").mkString(" props:[", ", ", "]")
+                        namedProperties
+                          .map(s => s"${s.name}:${s.getClass.getSimpleName}")
+                          .mkString(" props:[", ", ", "]")
                       else "")
 }
 
@@ -287,6 +297,10 @@ case class InternalSchemaReference(
   override val required: Boolean = requiredFields.contains(name)
   override val validated: Boolean = schema.validated
 
+  def isNonStandard: Boolean = !(reference.contains("$defs") || reference.contains("definitions"))
+
+  override lazy val resolved: Schema = schema.resolved
+
   override def toString: String = super.toString + s" ref:$reference resolvedTo:{$schema}"
 }
 
@@ -302,20 +316,33 @@ case class ExternalSchemaReference(
   override val required: Boolean = requiredFields.contains(name)
   override val validated: Boolean = schema.validated
 
+  override lazy val resolved: Schema = schema.resolved
+
   override def toString: String = super.toString + s" ref:$reference resolvedTo:{$schema}"
 }
 
-case class SchemaStub(attributes: SchemaAttributes, reference: String) extends Schema {
+case class SchemaStub(attributes: SchemaAttributes, reference: String, resolver: SchemaReferenceResolver)
+    extends Schema {
 
   override val required: Boolean = false
   override val validated: Boolean = false
   override val primitive: Boolean = false
+
+  override lazy val resolved: Schema =
+    resolver
+      .lookupSchema(URI.create(reference), None)
+      .flatMap {
+        case (_: SchemaStub, _) => None
+        case (schema, _)        => Some(schema.resolved)
+      }
+      .getOrElse(throw new IllegalStateException(
+        s"Resolving type of the schema stub reference $reference, but the target schema not found in $resolver"))
 
   override def toString: String = super.toString + s" ref:$reference"
 
 }
 
 object SchemaStub {
-  def apply(schema: Schema, reference: String): SchemaStub =
-    new SchemaStub(schema.attributes, reference)
+  def apply(schema: Schema, reference: String, resolver: SchemaReferenceResolver): SchemaStub =
+    new SchemaStub(schema.attributes, reference, resolver)
 }

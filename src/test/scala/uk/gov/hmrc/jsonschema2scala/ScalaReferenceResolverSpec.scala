@@ -18,6 +18,10 @@ class ScalaReferenceResolverSpec extends WordSpec with Matchers {
     }
 
     "convert reference to JSON pointer" in {
+      toJsonPointer("foo/bar") shouldBe Nil
+      toJsonPointer("/foo/bar") shouldBe Nil
+      toJsonPointer("foo") shouldBe Nil
+      toJsonPointer("/foo") shouldBe Nil
       toJsonPointer("#/foo") shouldBe List("foo")
       toJsonPointer("http://test/bar#/foo") shouldBe List("foo")
       toJsonPointer("http://test/bar/#/foo") shouldBe List("foo")

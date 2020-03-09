@@ -1,7 +1,7 @@
 {
     "title": "Schema for JSON-LD",
     "$schema": "http://json-schema.org/draft-04/schema#",
-
+    "$id": "http://json.schemastore.org/jsonld#",
     "definitions":{
         "context": {
             "additionalProperties": true,

@@ -68,7 +68,7 @@ class ScalaCodeGeneratorSchemaSnippetsSpec
                                  |    "eg-dhj": {
                                  |      "type": "number"
                                  |    },
-                                 |    "abc-def": {
+                                 |    "clone": {
                                  |      "type": "boolean"
                                  |    }
                                  |  },
@@ -648,11 +648,12 @@ class ScalaCodeGeneratorSchemaSnippetsSpec
                                  |        "type": "object",
                                  |        "properties": {
                                  |          "second": {
-                                 |            "type": "string"
+                                 |            "type": "integer"
                                  |          }
                                  |        }
                                  |      }
-                                 |    ]
+                                 |    ],
+                                 |    "required":["second"]
                                  |  }
                                  |}""".stripMargin)
 
