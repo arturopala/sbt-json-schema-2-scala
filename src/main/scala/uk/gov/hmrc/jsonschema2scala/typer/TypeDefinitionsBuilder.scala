@@ -28,6 +28,8 @@ object TypeDefinitionsBuilder {
 
     val name = NameUtils.normalizedFirstUppercase(schema.name)
 
+    println(s"Building type definitions for schema $name: ${schema.uri} ...")
+
     val (types, context) =
       TypeDefinitionsBuilder
         .processSchema(name, Nil, schema, Context())
@@ -35,8 +37,11 @@ object TypeDefinitionsBuilder {
           definition.copy(externalImports = TypeDefinitionsBuilder.calculateExternalImports(definition.schema))
         }.distinct)
 
-    (if (types.isEmpty) Left(s"Schema ${schema.uri} is not a valid type definition" :: Nil)
-     else if (types.size == 1) {
+    (if (types.isEmpty) {
+       println(s"Finished type definitions for schema ${schema.uri}, but no type has been produced.")
+       Left(s"Schema ${schema.uri} is not a valid type definition" :: Nil)
+     } else if (types.size == 1) {
+       println(s"Finished type definitions for schema ${schema.uri} with the single type ${types.head.name}.")
        Right(types.head)
      } else {
        types.find(_.name == name) match {
@@ -47,12 +52,16 @@ object TypeDefinitionsBuilder {
              .filterNot(_ == typeDef)
              .map(TypeDefinition.modifyPath(prependNameIfMissing(typeDef.name)))
 
+           println(s"Finished type definitions for schema ${schema.uri} with the primary type ${typeDef.name}.")
+
            Right(
              typeDef
                .copy(nestedTypes = typeDef.nestedTypes ++ movingTypes))
          }
 
          case None =>
+           println(s"Finished type definitions for schema ${schema.uri} with the umbrella object $name.")
+
            Right(
              TypeDefinition(
                name,
