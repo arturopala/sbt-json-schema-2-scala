@@ -89,8 +89,24 @@ class TreeSpec extends WordSpec with Matchers {
       tree1.contains(List(0, 11, 30)) shouldBe false
     }
 
-    "insert new branch to an empty Tree" in {
+    "insert new node to an empty Tree" in {
+      val tree: Tree[Int] = Tree.empty
+      val tree2 = tree.insert(0)
+      tree2 shouldBe Tree(0)
+      tree2.size shouldBe 1
+      tree2.numberOfBranches shouldBe 1
+    }
+
+    "insert new node to a single node Tree" in {
       val tree = Tree(0)
+      val tree2 = tree.insert(1)
+      tree2 shouldBe Tree(0, Tree(1))
+      tree2.size shouldBe 2
+      tree2.numberOfBranches shouldBe 1
+    }
+
+    "insert new branch to an empty Tree" in {
+      val tree: Tree[Int] = Tree.empty
       val tree2 = tree.insert(List(0, 1, 2, 3))
       tree2 shouldBe Tree(0, Tree(1, Tree(2, Tree(3))))
       tree2.size shouldBe 4

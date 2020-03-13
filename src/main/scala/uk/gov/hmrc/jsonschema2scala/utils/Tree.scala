@@ -2,6 +2,7 @@ package uk.gov.hmrc.jsonschema2scala.utils
 
 import scala.annotation.tailrec
 
+/** Immutable tree-like data structure, each node might have a value and its own subtrees */
 sealed trait Tree[+T] {
 
   /** The number of the nodes in the tree */
@@ -25,7 +26,7 @@ object Tree {
   }
 
   /** Concrete node of the Tree */
-  case class Node[T] private (node: T, subtrees: List[Node[T]]) extends Tree[T] {
+  case class Node[+T] private (node: T, subtrees: List[Node[T]]) extends Tree[T] {
 
     /** The number of the nodes in the tree */
     override val size: Int =
@@ -269,7 +270,14 @@ object Tree {
 
     // MODIFICATIONS
 
-    /** Inserts a new branch and returns updated tree
+    /** Inserts a new node holding the value and returns updated tree */
+    final def insert[T1 <: T](value: T1): Tree[T] =
+      tree match {
+        case `empty`              => Node(value, Nil)
+        case Node(node, subtrees) => Node(node, Node(value, Nil) :: subtrees)
+      }
+
+    /** Inserts a new branch of values and returns updated tree
       * New branch must start with the existing root element of tree,
       * otherwise the tree stays intact. */
     final def insert[T1 <: T](branch: List[T1]): Tree[T] =
