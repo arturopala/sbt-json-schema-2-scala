@@ -5,8 +5,11 @@ import uk.gov.hmrc.jsonschema2scala.utils.Tree
 
 class TreeSpec extends WordSpec with Matchers {
 
-  def showAsArrays(tree: Tree[Int]): String = tree.mkString(_.toString, ",", "\n", "[", "]")
-  def showAsGraph(tree: Tree[Int]): String = tree.mkString(_.toString, " > ", "\n", "", "")
+  def showAsArrays[T <: Any](tree: Tree[T]): String =
+    tree.mkString(_.toString, ",", "\n", "[", "]")
+
+  def showAsGraph[T <: Any](tree: Tree[T]): String =
+    tree.mkString(_.toString, " > ", "\n", "", "")
 
   "Tree" should {
     "create an empty Tree" in {
@@ -16,6 +19,7 @@ class TreeSpec extends WordSpec with Matchers {
       tree.countBranches(_.nonEmpty) shouldBe 0
       tree.countBranches(_.isEmpty) shouldBe 0
       showAsArrays(tree) shouldBe ""
+      tree.map(_ + 1) shouldBe Tree.empty
     }
 
     "create a single node Tree" in {
@@ -26,6 +30,7 @@ class TreeSpec extends WordSpec with Matchers {
       tree1.countBranches(_.nonEmpty) shouldBe 1
       tree1.countBranches(_.isEmpty) shouldBe 1
       showAsArrays(tree1) shouldBe "[0]"
+      tree1.map(_ + 1) shouldBe Tree(1)
     }
 
     "create a double node Tree" in {
@@ -34,6 +39,7 @@ class TreeSpec extends WordSpec with Matchers {
       tree1.numberOfBranches shouldBe 1
       tree1.countBranches(_.nonEmpty) shouldBe 1
       showAsArrays(tree1) shouldBe "[0,1]"
+      tree1.map(_ + 1) shouldBe Tree(1, Tree(2))
     }
 
     "create a three nodes Tree" in {
@@ -42,6 +48,7 @@ class TreeSpec extends WordSpec with Matchers {
       tree1.numberOfBranches shouldBe 1
       tree1.countBranches(_.nonEmpty) shouldBe 1
       showAsArrays(tree1) shouldBe "[0,1,2]"
+      tree1.map(_ + 1) shouldBe Tree(1, Tree(2, Tree(3)))
 
       val tree2 = Tree(0, Tree(10), Tree(11))
       tree2.size shouldBe 3
@@ -49,6 +56,7 @@ class TreeSpec extends WordSpec with Matchers {
       tree2.countBranches(_.nonEmpty) shouldBe 2
       showAsArrays(tree2) shouldBe """[0,10]
                                      |[0,11]""".stripMargin
+      tree2.map(_ + 1) shouldBe Tree(1, Tree(11), Tree(12))
     }
 
     "create a four nodes Tree" in {
@@ -57,6 +65,7 @@ class TreeSpec extends WordSpec with Matchers {
       tree1.numberOfBranches shouldBe 1
       tree1.countBranches(_.nonEmpty) shouldBe 1
       showAsArrays(tree1) shouldBe "[0,1,2,3]"
+      tree1.map(_ + 1) shouldBe Tree(1, Tree(2, Tree(3, Tree(4))))
 
       val tree2 = Tree(0, Tree(1, Tree(20), Tree(21)))
       tree2.size shouldBe 4
@@ -64,6 +73,7 @@ class TreeSpec extends WordSpec with Matchers {
       tree2.countBranches(_.nonEmpty) shouldBe 2
       showAsArrays(tree2) shouldBe """[0,1,20]
                                      |[0,1,21]""".stripMargin
+      tree2.map(_ + 1) shouldBe Tree(1, Tree(2, Tree(21), Tree(22)))
 
       val tree3 = Tree(0, Tree(10), Tree(11), Tree(12))
       tree3.size shouldBe 4
@@ -73,6 +83,7 @@ class TreeSpec extends WordSpec with Matchers {
       showAsArrays(tree3) shouldBe """[0,10]
                                      |[0,11]
                                      |[0,12]""".stripMargin
+      tree3.map(_ + 1) shouldBe Tree(1, Tree(11), Tree(12), Tree(13))
     }
 
     "create a multi-branch Tree" in {
@@ -81,11 +92,9 @@ class TreeSpec extends WordSpec with Matchers {
       tree.numberOfBranches shouldBe 3
       tree.countBranches(_.nonEmpty) shouldBe 3
       tree.countBranches(_.contains(12)) shouldBe 2
-      val s = showAsArrays(tree)
-      println(s)
-      s shouldBe """[0,11,20,30]
-                   |[0,12,21,31]
-                   |[0,12,22,32]""".stripMargin
+      showAsArrays(tree) shouldBe """[0,11,20,30]
+                                    |[0,12,21,31]
+                                    |[0,12,22,32]""".stripMargin
     }
 
     "check if the path exists" in {
@@ -172,20 +181,20 @@ class TreeSpec extends WordSpec with Matchers {
 
     "list all nodes" in {
       val tree = Tree.empty
+      tree.nodesUnsafe shouldBe Nil
+      val tree1 = Tree(0)
+      tree1.nodesUnsafe shouldBe List(0)
+      val tree2 = Tree(0, Tree(11, Tree(20, Tree(30))), Tree(12, Tree(21, Tree(31)), Tree(22, Tree(32))))
+      tree2.nodesUnsafe shouldBe List(0, 11, 20, 30, 12, 21, 31, 22, 32)
+    }
+
+    "list all nodes using tail safe method" in {
+      val tree = Tree.empty
       tree.nodes shouldBe Nil
       val tree1 = Tree(0)
       tree1.nodes shouldBe List(0)
       val tree2 = Tree(0, Tree(11, Tree(20, Tree(30))), Tree(12, Tree(21, Tree(31)), Tree(22, Tree(32))))
       tree2.nodes shouldBe List(0, 11, 20, 30, 12, 21, 31, 22, 32)
-    }
-
-    "list all nodes using tail safe method" in {
-      val tree = Tree.empty
-      tree.nodesTS shouldBe Nil
-      val tree1 = Tree(0)
-      tree1.nodesTS shouldBe List(0)
-      val tree2 = Tree(0, Tree(11, Tree(20, Tree(30))), Tree(12, Tree(21, Tree(31)), Tree(22, Tree(32))))
-      tree2.nodesTS shouldBe List(0, 11, 20, 30, 12, 21, 31, 22, 32)
     }
 
     "stream all nodes" in {
@@ -210,7 +219,7 @@ class TreeSpec extends WordSpec with Matchers {
                        |0 > 12 > 21 > 31
                        |0 > 12 > 22 > 32""".stripMargin
 
-      val branches: List[List[Int]] = tree.branches
+      val branches: List[List[Int]] = tree.branchesUnsafe
 
       val graph = branches.map(_.mkString(" > ")).mkString("\n")
       graph should be(expected)
@@ -225,7 +234,7 @@ class TreeSpec extends WordSpec with Matchers {
                        |0 > 12 > 21 > 31
                        |0 > 12 > 22 > 32""".stripMargin
 
-      val branches: List[List[Int]] = tree.branchesTS
+      val branches: List[List[Int]] = tree.branches
 
       val graph = branches.map(_.mkString(" > ")).mkString("\n")
       graph should be(expected)
@@ -266,10 +275,18 @@ class TreeSpec extends WordSpec with Matchers {
                        |
                        |32""".stripMargin
 
-      val trees: List[Tree[Int]] = tree.trees
+      val trees: List[Tree[Int]] = tree.treesUnsafe
       val treesGraph = trees.map(showAsGraph).mkString("\n\n")
 
       treesGraph should be(expected)
+    }
+
+    "map all nodes" in {
+      val tree = Tree(0, Tree(11, Tree(20, Tree(30))), Tree(12, Tree(21, Tree(31)), Tree(22, Tree(32))))
+      val tree2 = tree.map(_ + 1)
+      showAsGraph(tree2) shouldBe """1 > 12 > 21 > 31
+                                    |1 > 13 > 22 > 32
+                                    |1 > 13 > 23 > 33""".stripMargin
     }
   }
 
