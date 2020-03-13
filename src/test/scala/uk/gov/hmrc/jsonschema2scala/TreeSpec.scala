@@ -32,6 +32,7 @@ class TreeSpec extends WordSpec with Matchers {
       val tree1 = Tree(0, Tree(1))
       tree1.size shouldBe 2
       tree1.numberOfBranches shouldBe 1
+      tree1.countBranches(_.nonEmpty) shouldBe 1
       showAsArrays(tree1) shouldBe "[0,1]"
     }
 
@@ -39,11 +40,13 @@ class TreeSpec extends WordSpec with Matchers {
       val tree1 = Tree(0, Tree(1, Tree(2)))
       tree1.size shouldBe 3
       tree1.numberOfBranches shouldBe 1
+      tree1.countBranches(_.nonEmpty) shouldBe 1
       showAsArrays(tree1) shouldBe "[0,1,2]"
 
       val tree2 = Tree(0, Tree(10), Tree(11))
       tree2.size shouldBe 3
       tree2.numberOfBranches shouldBe 2
+      tree2.countBranches(_.nonEmpty) shouldBe 2
       showAsArrays(tree2) shouldBe """[0,10]
                                      |[0,11]""".stripMargin
     }
@@ -52,17 +55,21 @@ class TreeSpec extends WordSpec with Matchers {
       val tree1 = Tree(0, Tree(1, Tree(2, Tree(3))))
       tree1.size shouldBe 4
       tree1.numberOfBranches shouldBe 1
+      tree1.countBranches(_.nonEmpty) shouldBe 1
       showAsArrays(tree1) shouldBe "[0,1,2,3]"
 
       val tree2 = Tree(0, Tree(1, Tree(20), Tree(21)))
       tree2.size shouldBe 4
       tree2.numberOfBranches shouldBe 2
+      tree2.countBranches(_.nonEmpty) shouldBe 2
       showAsArrays(tree2) shouldBe """[0,1,20]
                                      |[0,1,21]""".stripMargin
 
       val tree3 = Tree(0, Tree(10), Tree(11), Tree(12))
       tree3.size shouldBe 4
       tree3.numberOfBranches shouldBe 3
+      tree3.countBranches(_.nonEmpty) shouldBe 3
+      tree3.countBranches(_.contains(11)) shouldBe 1
       showAsArrays(tree3) shouldBe """[0,10]
                                      |[0,11]
                                      |[0,12]""".stripMargin
@@ -72,6 +79,8 @@ class TreeSpec extends WordSpec with Matchers {
       val tree = Tree(0, Tree(11, Tree(20, Tree(30))), Tree(12, Tree(21, Tree(31)), Tree(22, Tree(32))))
       tree.size shouldBe 9
       tree.numberOfBranches shouldBe 3
+      tree.countBranches(_.nonEmpty) shouldBe 3
+      tree.countBranches(_.contains(12)) shouldBe 2
       val s = showAsArrays(tree)
       println(s)
       s shouldBe """[0,11,20,30]
