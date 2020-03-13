@@ -480,12 +480,15 @@ object Tree {
       }
   }
 
+  /** When expending a value of a node into a tree,
+    * we need a way to merge back original subtrees into a new tree. */
   trait TreeFlatMapStrategy[T] {
     def merge(node: Node[T], subtrees: List[Node[T]]): Node[T]
   }
 
   object TreeFlatMapStrategy {
 
+    /** Concatenates new and existing subtrees of an expanded node. */
     object JoinSubtrees {
       implicit def strategy[T]: TreeFlatMapStrategy[T] = new TreeFlatMapStrategy[T] {
         override def merge(node: Node[T], subtrees: List[Node[T]]): Node[T] =
