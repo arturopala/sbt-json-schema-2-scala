@@ -6,6 +6,9 @@ sealed trait Tree[+T] {
 
   /** The number of the nodes in the tree */
   val size: Int
+
+  /** The number of distinct branches starting at the root of the tree. */
+  val numberOfBranches: Int
 }
 
 object Tree {
@@ -18,6 +21,7 @@ object Tree {
   case object empty extends Tree[Nothing] {
 
     override val size: Int = 0
+    override val numberOfBranches: Int = 0
   }
 
   /** Concrete node of the Tree */
@@ -26,6 +30,10 @@ object Tree {
     /** The number of the nodes in the tree */
     override val size: Int =
       1 + subtrees.map(_.size).sum
+
+    /** The number of distinct branches starting at the root of the tree. */
+    override val numberOfBranches: Int =
+      Math.max(1, subtrees.map(_.numberOfBranches).sum)
   }
 
   implicit class TreeOps[T](tree: Tree[T]) {
@@ -64,10 +72,10 @@ object Tree {
           else listNodes(filter, result, subtrees ::: xs)
       }
 
-    /** Stream of the node's values in the tree, presented depth first */
+    /** Lazy stream of the node's values in the tree, presented depth first */
     final def nodeStream: Stream[T] = nodeStream(_ => true)
 
-    /** Filtered stream of the node's values in the tree, presented depth first. */
+    /** Filtered lazy stream of the node's values in the tree, presented depth first. */
     final def nodeStream(filter: T => Boolean): Stream[T] = streamNodes(filter, tree, Nil)
 
     private def streamNodes(filter: T => Boolean, tree: Tree[T], remaining: List[Node[T]]): Stream[T] =
@@ -183,27 +191,35 @@ object Tree {
           }
       }
 
-    /** Stream of all the branches of this tree starting at the root. */
-    def branchStream: Stream[List[T]] = streamBranches(tree, Nil, Nil)
+    /** Filtered lazy stream of all the branches of this tree starting at the root. */
+    def branchStream: Stream[List[T]] = branchStream(_ => true)
 
-    private def streamBranches(tree: Tree[T], acc: List[T], remaining: List[(List[T], Node[T])]): Stream[List[T]] =
+    def branchStream(filter: List[T] => Boolean): Stream[List[T]] = streamBranches(filter, tree, Nil, Nil)
+
+    private def streamBranches(
+      filter: List[T] => Boolean,
+      tree: Tree[T],
+      acc: List[T],
+      remaining: List[(List[T], Node[T])]): Stream[List[T]] =
       tree match {
-        case `empty` =>
-          Stream.cons(acc.reverse, remaining match {
-            case (acc2, y) :: ys => streamBranches(y, acc2, ys)
-            case Nil             => Stream.empty
-          })
+        case `empty` => Stream.empty
 
         case Node(node, subtrees) =>
           subtrees match {
             case x :: Nil =>
-              streamBranches(x, node :: acc, remaining)
+              streamBranches(filter, x, node :: acc, remaining)
 
             case x :: xs =>
-              streamBranches(x, node :: acc, (acc, Node(node, xs)) :: remaining)
+              streamBranches(filter, x, node :: acc, (acc, Node(node, xs)) :: remaining)
 
             case Nil =>
-              streamBranches(empty, node :: acc, remaining)
+              val branch = node :: acc
+              def continue: Stream[List[T]] = remaining match {
+                case (acc2, y) :: ys => streamBranches(filter, y, acc2, ys)
+                case Nil             => Stream.empty
+              }
+              if (filter(branch)) Stream.cons(branch.reverse, continue)
+              else continue
           }
       }
 
@@ -229,29 +245,33 @@ object Tree {
           }
       }
 
-    /** Returns the number of distinct branches starting at the root of the tree. */
-    final def numberOfBranches: Int = tree match {
+    /** Returns the number of distinct branches accepted by the filter, starting at the root of the tree. */
+    final def countBranches(filter: List[T] => Boolean): Int = tree match {
       case `empty` => 0
-      case Node(_, subtrees) =>
+      case Node(node, subtrees) =>
         subtrees match {
           case Nil => 1
-          case _   => countBranches(0, subtrees)
+          case _   => countBranches(filter, 0, subtrees.map((List(node), _)))
         }
     }
 
     @tailrec
-    private def countBranches(acc: Int, remaining: List[Node[T]]): Int = remaining match {
-      case Nil => acc
-      case Node(_, subtrees) :: xs =>
-        subtrees match {
-          case Nil => countBranches(acc + 1, xs)
-          case _   => countBranches(acc, subtrees ::: xs)
-        }
-    }
+    private def countBranches(filter: List[T] => Boolean, result: Int, remaining: List[(List[T], Node[T])]): Int =
+      remaining match {
+        case Nil => result
+        case (acc, Node(node, subtrees)) :: xs =>
+          val branch = node :: acc
+          subtrees match {
+            case Nil if filter(branch) => countBranches(filter, 1 + result, xs)
+            case _                     => countBranches(filter, result, subtrees.map((branch, _)) ::: xs)
+          }
+      }
+
+    // MODIFICATIONS
 
     /** Inserts a new branch and returns updated tree
       * New branch must start with the existing root element of tree,
-      * otherwise nothing will happen. */
+      * otherwise the tree stays intact. */
     final def insert[T1 <: T](branch: List[T1]): Tree[T] =
       branch match {
         case x :: xs =>
@@ -287,6 +307,68 @@ object Tree {
           }
 
         case Nil => tree
+      }
+
+    // VISUALIZATION
+
+    /** Make a String representation of the tree.
+      * @param show function to render a node value
+      * @param nodeSeparator string to separate nodes
+      * @param branchStart string to add at the start of each branch
+      * @param branchEnd string to add at the end of each branch
+      * @param branchSeparator string to separate branches
+      */
+    final def mkString(
+      show: T => String,
+      nodeSeparator: String,
+      branchSeparator: String,
+      branchStart: String,
+      branchEnd: String): String =
+      tree match {
+        case `empty`         => ""
+        case Node(node, Nil) => branchStart + show(node) + branchEnd
+        case Node(node, subtrees) =>
+          val s = show(node)
+          mkString(
+            show,
+            nodeSeparator,
+            branchSeparator,
+            branchEnd,
+            new StringBuilder().append(branchStart).append(s),
+            subtrees.map((branchStart + s, _)),
+            newBranch = false
+          ).mkString
+      }
+
+    @tailrec
+    private def mkString(
+      show: T => String,
+      nodeSeparator: String,
+      branchSeparator: String,
+      branchEnd: String,
+      result: StringBuilder,
+      remaining: List[(String, Node[T])],
+      newBranch: Boolean): StringBuilder =
+      remaining match {
+        case Nil => result
+        case (prefix, Node(node, subtrees)) :: xs =>
+          val s = show(node)
+          val builder = (if (newBranch) result.append(branchSeparator).append(prefix) else result)
+            .append(nodeSeparator)
+            .append(s)
+          subtrees match {
+            case Nil =>
+              mkString(show, nodeSeparator, branchSeparator, branchEnd, builder.append(branchEnd), xs, newBranch = true)
+            case _ =>
+              mkString(
+                show,
+                nodeSeparator,
+                branchSeparator,
+                branchEnd,
+                builder,
+                subtrees.map((prefix + nodeSeparator + s, _)) ::: xs,
+                newBranch = false)
+          }
       }
   }
 

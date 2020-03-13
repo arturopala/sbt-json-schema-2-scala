@@ -5,24 +5,78 @@ import uk.gov.hmrc.jsonschema2scala.utils.Tree
 
 class TreeSpec extends WordSpec with Matchers {
 
+  def showAsArrays(tree: Tree[Int]): String = tree.mkString(_.toString, ",", "\n", "[", "]")
+  def showAsGraph(tree: Tree[Int]): String = tree.mkString(_.toString, " > ", "\n", "", "")
+
   "Tree" should {
     "create an empty Tree" in {
-      val tree = Tree.empty
+      val tree: Tree[Int] = Tree.empty
       tree.size shouldBe 0
       tree.numberOfBranches shouldBe 0
+      tree.countBranches(_.nonEmpty) shouldBe 0
+      tree.countBranches(_.isEmpty) shouldBe 0
+      showAsArrays(tree) shouldBe ""
     }
 
     "create a single node Tree" in {
-      val tree = Tree(0)
-      tree shouldBe Tree.Node(0, Nil)
-      tree.size shouldBe 1
-      tree.numberOfBranches shouldBe 1
+      val tree1 = Tree(0)
+      tree1 shouldBe Tree.Node(0, Nil)
+      tree1.size shouldBe 1
+      tree1.numberOfBranches shouldBe 1
+      tree1.countBranches(_.nonEmpty) shouldBe 1
+      tree1.countBranches(_.isEmpty) shouldBe 1
+      showAsArrays(tree1) shouldBe "[0]"
+    }
+
+    "create a double node Tree" in {
+      val tree1 = Tree(0, Tree(1))
+      tree1.size shouldBe 2
+      tree1.numberOfBranches shouldBe 1
+      showAsArrays(tree1) shouldBe "[0,1]"
+    }
+
+    "create a three nodes Tree" in {
+      val tree1 = Tree(0, Tree(1, Tree(2)))
+      tree1.size shouldBe 3
+      tree1.numberOfBranches shouldBe 1
+      showAsArrays(tree1) shouldBe "[0,1,2]"
+
+      val tree2 = Tree(0, Tree(10), Tree(11))
+      tree2.size shouldBe 3
+      tree2.numberOfBranches shouldBe 2
+      showAsArrays(tree2) shouldBe """[0,10]
+                                     |[0,11]""".stripMargin
+    }
+
+    "create a four nodes Tree" in {
+      val tree1 = Tree(0, Tree(1, Tree(2, Tree(3))))
+      tree1.size shouldBe 4
+      tree1.numberOfBranches shouldBe 1
+      showAsArrays(tree1) shouldBe "[0,1,2,3]"
+
+      val tree2 = Tree(0, Tree(1, Tree(20), Tree(21)))
+      tree2.size shouldBe 4
+      tree2.numberOfBranches shouldBe 2
+      showAsArrays(tree2) shouldBe """[0,1,20]
+                                     |[0,1,21]""".stripMargin
+
+      val tree3 = Tree(0, Tree(10), Tree(11), Tree(12))
+      tree3.size shouldBe 4
+      tree3.numberOfBranches shouldBe 3
+      showAsArrays(tree3) shouldBe """[0,10]
+                                     |[0,11]
+                                     |[0,12]""".stripMargin
     }
 
     "create a multi-branch Tree" in {
       val tree = Tree(0, Tree(11, Tree(20, Tree(30))), Tree(12, Tree(21, Tree(31)), Tree(22, Tree(32))))
       tree.size shouldBe 9
       tree.numberOfBranches shouldBe 3
+      val s = showAsArrays(tree)
+      println(s)
+      s shouldBe """[0,11,20,30]
+                   |[0,12,21,31]
+                   |[0,12,22,32]""".stripMargin
     }
 
     "check if the path exists" in {
@@ -130,9 +184,12 @@ class TreeSpec extends WordSpec with Matchers {
       val expected = """0 > 11 > 20 > 30
                        |0 > 12 > 21 > 31
                        |0 > 12 > 22 > 32""".stripMargin
+
       val branches: List[List[Int]] = tree.branches
 
-      branches.map(_.mkString(" > ")).mkString("\n") should be(expected)
+      val graph = branches.map(_.mkString(" > ")).mkString("\n")
+      graph should be(expected)
+      graph shouldBe showAsGraph(tree)
       branches.forall(tree.contains) shouldBe true
       branches.reverse.foldLeft[Tree[Int]](Tree.empty)(_.insert(_)) shouldBe tree
     }
@@ -142,18 +199,23 @@ class TreeSpec extends WordSpec with Matchers {
       val expected = """0 > 11 > 20 > 30
                        |0 > 12 > 21 > 31
                        |0 > 12 > 22 > 32""".stripMargin
+
       val branches: List[List[Int]] = tree.branchesTS
 
-      branches.map(_.mkString(" > ")).mkString("\n") should be(expected)
+      val graph = branches.map(_.mkString(" > ")).mkString("\n")
+      graph should be(expected)
+      graph shouldBe showAsGraph(tree)
       branches.forall(tree.contains) shouldBe true
       branches.reverse.foldLeft[Tree[Int]](Tree.empty)(_.insert(_)) shouldBe tree
     }
 
     "stream all branches" in {
       val tree = Tree(0, Tree(11, Tree(20, Tree(30))), Tree(12, Tree(21, Tree(31)), Tree(22, Tree(32))))
-      tree.branchStream.map(_.mkString(" > ")).mkString("\n") should be("""0 > 11 > 20 > 30
-                                                                          |0 > 12 > 21 > 31
-                                                                          |0 > 12 > 22 > 32""".stripMargin)
+      val graph = tree.branchStream.map(_.mkString(" > ")).mkString("\n")
+      graph shouldBe """0 > 11 > 20 > 30
+                       |0 > 12 > 21 > 31
+                       |0 > 12 > 22 > 32""".stripMargin
+      graph shouldBe showAsGraph(tree)
     }
 
     "list all sub-trees" in {
@@ -180,7 +242,7 @@ class TreeSpec extends WordSpec with Matchers {
                        |32""".stripMargin
 
       val trees: List[Tree[Int]] = tree.trees
-      val treesGraph = trees.map(_.branches.map(_.mkString(" > ")).mkString("\n")).mkString("\n\n")
+      val treesGraph = trees.map(showAsGraph).mkString("\n\n")
 
       treesGraph should be(expected)
     }
