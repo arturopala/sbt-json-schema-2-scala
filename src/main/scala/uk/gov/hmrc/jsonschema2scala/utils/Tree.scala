@@ -14,6 +14,7 @@ sealed trait Tree[+T] {
 
 object Tree {
 
+  def apply[T](): Tree[T] = empty
   def apply[T](node: T): Node[T] = Node(node, Nil)
   def apply[T](node: T, branch: Node[T], others: Node[T]*): Node[T] = Node(node, branch :: others.toList)
   def apply[T](node: T, subtrees: List[Node[T]]): Node[T] = Node(node, subtrees)
