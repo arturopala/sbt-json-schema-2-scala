@@ -287,6 +287,29 @@ class TreeSpec extends WordSpec with Matchers {
       showAsGraph(tree2) shouldBe """1 > 12 > 21 > 31
                                     |1 > 13 > 22 > 32
                                     |1 > 13 > 23 > 33""".stripMargin
+      val tree3 = tree.mapUnsafe(_ + 1)
+      tree3 shouldBe tree2
+    }
+
+    "flatMap all nodes" in {
+      val tree = Tree(0)
+      val result = tree.flatMap(n => Tree(n + 1))
+      showAsGraph(result) shouldBe "1"
+
+      val tree2 = Tree(0, Tree(1))
+      val result2 = tree2.flatMap(n => Tree(n + 1, Tree(n + 2)))
+      showAsGraph(result2) shouldBe
+        """1 > 2 > 3
+          |1 > 2""".stripMargin
+
+      val tree3 = Tree(0, Tree(5, Tree(10)))
+      val result3 = tree3.flatMap(n => Tree(n + 1, Tree(n + 2, Tree(n + 3))))
+      val graph3 = showAsGraph(result3)
+      println(graph3)
+      graph3 shouldBe
+        """1 > 6 > 11 > 12 > 13
+          |1 > 6 > 7 > 8
+          |1 > 2 > 3""".stripMargin
     }
   }
 

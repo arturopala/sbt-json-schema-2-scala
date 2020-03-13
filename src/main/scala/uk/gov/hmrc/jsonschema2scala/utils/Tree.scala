@@ -19,12 +19,6 @@ object Tree {
   def apply[T](node: T, branch: Node[T], others: Node[T]*): Node[T] = Node(node, branch :: others.toList)
   def apply[T](node: T, subtrees: List[Node[T]]): Node[T] = Node(node, subtrees)
 
-  private final def buildFromList[K](list: List[(Int, K)], result: List[Node[K]]): Tree[K] = list match {
-    case Nil => result.headOption.getOrElse(empty)
-    case (size, value) :: xs =>
-      buildFromList(xs, Node(value, result.take(size)) :: result.drop(size))
-  }
-
   /** An empty Tree */
   case object empty extends Tree[Nothing] {
 
@@ -48,12 +42,34 @@ object Tree {
     def apply[T](value: T): Node[T] = Node(value, Nil)
   }
 
+  @tailrec
+  private final def buildFromNodeList[K](list: List[(Int, K)], result: List[Node[K]]): Tree[K] = list match {
+    case Nil => result.headOption.getOrElse(empty)
+    case (size, value) :: xs =>
+      buildFromNodeList(xs, Node(value, result.take(size)) :: result.drop(size))
+  }
+
+  @tailrec
+  private final def buildFromTreeList[K](list: List[(Int, Tree[K])], result: List[Node[K]], removed: Int)(
+    implicit strategy: TreeFlatMapStrategy[K]): Tree[K] =
+    list match {
+      case Nil => result.headOption.getOrElse(empty)
+      case (size, tree) :: xs =>
+        tree match {
+          case `empty` => buildFromTreeList(xs, result.drop(size - removed), -1)
+          case node: Node[K] =>
+            val merged = strategy.merge(node, result.take(size))
+            buildFromTreeList(xs, merged :: result.drop(size), 0)
+        }
+    }
+
   /** Functions of the Tree */
   implicit class TreeOps[T](tree: Tree[T]) {
 
     // NODES
 
-    /** List of all the node's values in the tree, presented depth first. */
+    /** List of all the node's values in the tree, presented depth first.
+      * Uses unsafe nested recursions. */
     final def nodesUnsafe: List[T] =
       tree match {
         case `empty` => Nil
@@ -67,10 +83,12 @@ object Tree {
 
       }
 
-    /** List of all the node's values in the tree, presented depth first. Uses tail safe method. */
+    /** List of all the node's values in the tree, presented depth first.
+      * Uses tail safe recursion. */
     final def nodes: List[T] = nodes(_ => true)
 
-    /** List of filtered node's values in the tree, presented depth first. Uses tail safe method. */
+    /** List of filtered node's values in the tree, presented depth first.
+      * Uses tail safe recursion. */
     final def nodes(filter: T => Boolean): List[T] = tree match {
       case Node(node, subtrees) if filter(node) => listNodes(filter, List(node), subtrees)
       case _                                    => Nil
@@ -133,7 +151,8 @@ object Tree {
           }
       }
 
-    /** List all the possible subtrees of this tree inclusive. */
+    /** List all the possible subtrees of this tree inclusive.
+      * Uses unsafe nested recursions. */
     final def treesUnsafe: List[Tree[T]] = tree match {
       case `empty` => Nil
       case node @ Node(_, subtrees) =>
@@ -141,11 +160,11 @@ object Tree {
     }
 
     /** List all the possible subtrees of this tree inclusive.
-      * Uses tail safe method. Outcome is the same as of `trees`. */
+      * Uses tail safe recursion. */
     final def trees: List[Tree[T]] = trees(_ => true)
 
     /** List filtered subtrees of this tree inclusive.
-      * Uses tail safe method. Outcome is the same as of `trees`. */
+      * Uses tail safe recursion. */
     final def trees(filter: Tree[T] => Boolean): List[Tree[T]] = tree match {
       case node @ Node(_, subtrees) if filter(node) => listTrees(filter, List(node), subtrees)
       case `empty`                                  => List(empty)
@@ -177,11 +196,11 @@ object Tree {
       }
 
     /** List all the branches of this tree starting at the root.
-      * Uses tail safe method. Outcome is the same as `branches`. */
+      * Uses tail safe recursion. Outcome is the same as `branches`. */
     final def branches: List[List[T]] = branches(_ => true)
 
     /** List filtered branches of this tree starting at the root.
-      * Uses tail safe method. Outcome is the same as `branches`.
+      * Uses tail safe recursion. Outcome is the same as `branches`.
       * Warning: An argument to the filter function is a REVERSED branch.
       */
     final def branches(filter: List[T] => Boolean): List[List[T]] = tree match {
@@ -342,7 +361,8 @@ object Tree {
 
     // TRANSFORMATION
 
-    /** Maps all nodes of the tree using provided function and returns a new tree. */
+    /** Maps all nodes of the tree using provided function and returns a new tree.
+      * Uses nested recursions. */
     final def mapUnsafe[K](f: T => K): Tree[K] = tree match {
       case `empty` => empty
       case node: Node[T] =>
@@ -351,12 +371,12 @@ object Tree {
     }
 
     /** Maps all nodes of the tree using provided function and returns a new tree.
-      * Uses tail safe method. */
+      * Uses tail safe recursion. */
     final def map[K](f: T => K): Tree[K] = tree match {
       case `empty` => empty
       case Node(value, subtrees) =>
         val list: List[(Int, K)] = mapNodes(f, List((subtrees.size, f(value))), subtrees)
-        buildFromList(list, Nil)
+        buildFromNodeList(list, Nil)
     }
 
     @tailrec
@@ -371,10 +391,35 @@ object Tree {
 
       }
 
+    /** Flat-maps all nodes of the tree using provided function and returns a new tree.
+      * Uses tail safe recursion. */
+    final def flatMap[K](f: T => Tree[K])(
+      implicit strategy: TreeFlatMapStrategy[K] = TreeFlatMapStrategy.JoinSubtrees.strategy[K]): Tree[K] = tree match {
+      case `empty` => empty
+      case Node(value, subtrees) =>
+        val list: List[(Int, Tree[K])] = flatMapNodes(f, List((subtrees.size, f(value))), subtrees)
+        buildFromTreeList(list, Nil, 0)
+    }
+
+    @tailrec
+    private def flatMapNodes[K](
+      f: T => Tree[K],
+      result: List[(Int, Tree[K])],
+      remaining: List[Node[T]]): List[(Int, Tree[K])] =
+      remaining match {
+        case Nil => result
+        case Node(node, subtrees) :: xs =>
+          subtrees match {
+            case Nil => flatMapNodes(f, (subtrees.size, f(node)) :: result, subtrees ::: xs)
+            case _   => flatMapNodes(f, (subtrees.size, f(node)) :: result, subtrees ::: xs)
+          }
+
+      }
+
     // VISUALIZATION
 
     /** Makes a String representation of the tree.
-      * Uses tail safe method.
+      * Uses tail safe recursion.
       * @param show function to render a node value
       * @param nodeSeparator string to separate nodes
       * @param branchStart string to add at the start of each branch
@@ -433,6 +478,21 @@ object Tree {
                 newBranch = false)
           }
       }
+  }
+
+  trait TreeFlatMapStrategy[T] {
+    def merge(node: Node[T], subtrees: List[Node[T]]): Node[T]
+  }
+
+  object TreeFlatMapStrategy {
+
+    object JoinSubtrees {
+      implicit def strategy[T]: TreeFlatMapStrategy[T] = new TreeFlatMapStrategy[T] {
+        override def merge(node: Node[T], subtrees: List[Node[T]]): Node[T] =
+          Node(node.value, subtrees ::: node.subtrees)
+      }
+    }
+
   }
 
 }
