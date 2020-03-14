@@ -2,14 +2,9 @@ package uk.gov.hmrc.jsonschema2scala
 
 import org.scalatest.{Matchers, WordSpec}
 import uk.gov.hmrc.jsonschema2scala.utils.Tree
+import uk.gov.hmrc.jsonschema2scala.utils.Tree.Show._
 
 class TreeSpec extends WordSpec with Matchers {
-
-  def showAsArrays[T <: Any](tree: Tree[T]): String =
-    tree.mkString(_.toString, ",", "\n", "[", "]")
-
-  def showAsGraph[T <: Any](tree: Tree[T]): String =
-    tree.mkString(_.toString, " > ", "\n", "", "")
 
   "Tree" should {
     "create an empty Tree" in {
@@ -54,8 +49,9 @@ class TreeSpec extends WordSpec with Matchers {
       tree2.size shouldBe 3
       tree2.numberOfBranches shouldBe 2
       tree2.countBranches(_.nonEmpty) shouldBe 2
-      showAsArrays(tree2) shouldBe """[0,10]
-                                     |[0,11]""".stripMargin
+      showAsArrays(tree2) shouldBe
+        """[0,10]
+          |[0,11]""".stripMargin
       tree2.map(_ + 1) shouldBe Tree(1, Tree(11), Tree(12))
     }
 
@@ -71,8 +67,9 @@ class TreeSpec extends WordSpec with Matchers {
       tree2.size shouldBe 4
       tree2.numberOfBranches shouldBe 2
       tree2.countBranches(_.nonEmpty) shouldBe 2
-      showAsArrays(tree2) shouldBe """[0,1,20]
-                                     |[0,1,21]""".stripMargin
+      showAsArrays(tree2) shouldBe
+        """[0,1,20]
+          |[0,1,21]""".stripMargin
       tree2.map(_ + 1) shouldBe Tree(1, Tree(2, Tree(21), Tree(22)))
 
       val tree3 = Tree(0, Tree(10), Tree(11), Tree(12))
@@ -80,9 +77,10 @@ class TreeSpec extends WordSpec with Matchers {
       tree3.numberOfBranches shouldBe 3
       tree3.countBranches(_.nonEmpty) shouldBe 3
       tree3.countBranches(_.contains(11)) shouldBe 1
-      showAsArrays(tree3) shouldBe """[0,10]
-                                     |[0,11]
-                                     |[0,12]""".stripMargin
+      showAsArrays(tree3) shouldBe
+        """[0,10]
+          |[0,11]
+          |[0,12]""".stripMargin
       tree3.map(_ + 1) shouldBe Tree(1, Tree(11), Tree(12), Tree(13))
     }
 
@@ -92,11 +90,14 @@ class TreeSpec extends WordSpec with Matchers {
       tree.numberOfBranches shouldBe 3
       tree.countBranches(_.nonEmpty) shouldBe 3
       tree.countBranches(_.contains(12)) shouldBe 2
-      showAsArrays(tree) shouldBe """[0,11,20,30]
-                                    |[0,12,21,31]
-                                    |[0,12,22,32]""".stripMargin
+      showAsArrays(tree) shouldBe
+        """[0,11,20,30]
+          |[0,12,21,31]
+          |[0,12,22,32]""".stripMargin
     }
+  }
 
+  "Tree.TreeOps" should {
     "check if the path exists" in {
       val tree = Tree.empty
       tree.contains(List(0, 1)) shouldBe false
@@ -310,6 +311,95 @@ class TreeSpec extends WordSpec with Matchers {
         """1 > 6 > 11 > 12 > 13
           |1 > 6 > 7 > 8
           |1 > 2 > 3""".stripMargin
+    }
+  }
+
+  "Tree.Builder" should {
+    "create a new tree from the list of values" in {
+      val list: List[(Int, String)] = List((0, "a"), (0, "b"), (0, "c"), (3, "d"))
+
+      val trees = Tree.Builder.buildFromValueList(list)
+
+      trees.size shouldBe 1
+      trees.head.size shouldBe 4
+      trees.head.numberOfBranches shouldBe 3
+      trees.head shouldBe Tree("d", Tree("c"), Tree("b"), Tree("a"))
+      showAsGraph(trees.head) shouldBe
+        """d > c
+          |d > b
+          |d > a""".stripMargin
+    }
+
+    "create a new trees from the list of values" in {
+      val list: List[(Int, String)] = List((0, "a"), (1, "b"), (0, "c"), (1, "d"))
+
+      val trees = Tree.Builder.buildFromValueList(list)
+
+      trees.size shouldBe 2
+      trees(0) shouldBe Tree("d", Tree("c"))
+      trees(1) shouldBe Tree("b", Tree("a"))
+    }
+
+    "create a new tree from the list of single-node trees" in {
+      val list: List[(Int, Tree[String])] = List((0, Tree("a")), (0, Tree("b")), (0, Tree("c")), (3, Tree("d")))
+
+      val trees = Tree.Builder.buildFromTreeList(list)
+
+      trees.size shouldBe 1
+      trees.head.size shouldBe 4
+      trees.head.numberOfBranches shouldBe 3
+      trees.head shouldBe Tree("d", Tree("c"), Tree("b"), Tree("a"))
+      showAsGraph(trees.head) shouldBe
+        """d > c
+          |d > b
+          |d > a""".stripMargin
+    }
+
+    "create a new tree from the list of multi-node trees (1)" in {
+      val list: List[(Int, Tree[String])] =
+        List((0, Tree("a", Tree("A"))), (0, Tree("b", Tree("B"))), (0, Tree("c", Tree("C"))), (3, Tree("d", Tree("D"))))
+
+      val trees = Tree.Builder.buildFromTreeList(list)
+
+      trees.size shouldBe 1
+      trees.head.size shouldBe 8
+      trees.head.numberOfBranches shouldBe 4
+      trees.head shouldBe Tree("d", Tree("c", Tree("C")), Tree("b", Tree("B")), Tree("a", Tree("A")), Tree("D"))
+      showAsGraph(trees.head) shouldBe
+        """d > c > C
+          |d > b > B
+          |d > a > A
+          |d > D""".stripMargin
+    }
+
+    "create a new tree from the list of multi-node trees (2)" in {
+      val list: List[(Int, Tree[String])] =
+        List((0, Tree("a", Tree("A"))), (1, Tree("b", Tree("B"))), (1, Tree("c", Tree("C"))), (1, Tree("d", Tree("D"))))
+
+      val trees = Tree.Builder.buildFromTreeList(list)
+
+      trees.size shouldBe 1
+      trees.head.size shouldBe 8
+      trees.head.numberOfBranches shouldBe 4
+      trees.head shouldBe Tree("d", Tree("c", Tree("b", Tree("a", Tree("A")), Tree("B")), Tree("C")), Tree("D"))
+      showAsGraph(trees.head) shouldBe
+        """d > c > b > a > A
+          |d > c > b > B
+          |d > c > C
+          |d > D""".stripMargin
+    }
+
+    "create a new tree from the list of multi-node trees using replace strategy" in {
+      val list: List[(Int, Tree[String])] =
+        List((0, Tree("a", Tree("A"))), (0, Tree("b", Tree("B"))), (0, Tree("c", Tree("C"))), (3, Tree("d", Tree("D"))))
+
+      val trees = Tree.Builder.buildFromTreeList(list, strategy = Tree.FlatMapStrategy.Replace)
+
+      trees.size shouldBe 1
+      trees.head.size shouldBe 2
+      trees.head.numberOfBranches shouldBe 1
+      trees.head shouldBe Tree("d", Tree("D"))
+      showAsGraph(trees.head) shouldBe "d > D"
     }
   }
 

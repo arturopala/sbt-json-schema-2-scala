@@ -2,7 +2,7 @@ package uk.gov.hmrc.jsonschema2scala.utils
 
 import scala.annotation.tailrec
 
-/** Immutable tree-like data structure, each node might have a value and its own subtrees */
+/** Immutable tree-like data structure, each node holds a value and its own subtrees */
 sealed trait Tree[+T] {
 
   /** The number of the nodes in the tree */
@@ -41,27 +41,6 @@ object Tree {
   object Node {
     def apply[T](value: T): Node[T] = Node(value, Nil)
   }
-
-  @tailrec
-  private final def buildFromNodeList[K](list: List[(Int, K)], result: List[Node[K]]): Tree[K] = list match {
-    case Nil => result.headOption.getOrElse(empty)
-    case (size, value) :: xs =>
-      buildFromNodeList(xs, Node(value, result.take(size)) :: result.drop(size))
-  }
-
-  @tailrec
-  private final def buildFromTreeList[K](list: List[(Int, Tree[K])], result: List[Node[K]], removed: Int)(
-    implicit strategy: TreeFlatMapStrategy[K]): Tree[K] =
-    list match {
-      case Nil => result.headOption.getOrElse(empty)
-      case (size, tree) :: xs =>
-        tree match {
-          case `empty` => buildFromTreeList(xs, result.drop(size - removed), -1)
-          case node: Node[K] =>
-            val merged = strategy.merge(node, result.take(size))
-            buildFromTreeList(xs, merged :: result.drop(size), 0)
-        }
-    }
 
   /** Functions of the Tree */
   implicit class TreeOps[T](tree: Tree[T]) {
@@ -376,7 +355,7 @@ object Tree {
       case `empty` => empty
       case Node(value, subtrees) =>
         val list: List[(Int, K)] = mapNodes(f, List((subtrees.size, f(value))), subtrees)
-        buildFromNodeList(list, Nil)
+        Builder.buildFromValueList(list, Nil).headOption.getOrElse(empty)
     }
 
     @tailrec
@@ -393,13 +372,13 @@ object Tree {
 
     /** Flat-maps all nodes of the tree using provided function and returns a new tree.
       * Uses tail safe recursion. */
-    final def flatMap[K](f: T => Tree[K])(
-      implicit strategy: TreeFlatMapStrategy[K] = TreeFlatMapStrategy.JoinSubtrees.strategy[K]): Tree[K] = tree match {
-      case `empty` => empty
-      case Node(value, subtrees) =>
-        val list: List[(Int, Tree[K])] = flatMapNodes(f, List((subtrees.size, f(value))), subtrees)
-        buildFromTreeList(list, Nil, 0)
-    }
+    final def flatMap[K](f: T => Tree[K])(implicit strategy: FlatMapStrategy = FlatMapStrategy.JoinSubtrees): Tree[K] =
+      tree match {
+        case `empty` => empty
+        case Node(value, subtrees) =>
+          val list: List[(Int, Tree[K])] = flatMapNodes(f, List((subtrees.size, f(value))), subtrees)
+          Builder.buildFromTreeList(list, Nil, 0, strategy).headOption.getOrElse(empty)
+      }
 
     @tailrec
     private def flatMapNodes[K](
@@ -480,21 +459,94 @@ object Tree {
       }
   }
 
-  /** When expending a value of a node into a tree,
-    * we need a way to merge back original subtrees into a new tree. */
-  trait TreeFlatMapStrategy[T] {
-    def merge(node: Node[T], subtrees: List[Node[T]]): Node[T]
+  trait FlatMapStrategy {
+
+    /** When a value of a node expands into a new Node,
+      * we need a way to deal with the existing subtrees. */
+    def merge[T](newNode: Node[T], existingSubtrees: List[Node[T]]): Node[T]
+
+    /** When a value of a node expands into an Empty tree,
+      * we need to decide either to keep or remove existing subtrees. */
+    def keepOrphanedSubtrees: Boolean
   }
 
-  object TreeFlatMapStrategy {
+  object FlatMapStrategy {
 
-    /** Concatenates new and existing subtrees of an expanded node. */
-    object JoinSubtrees {
-      implicit def strategy[T]: TreeFlatMapStrategy[T] = new TreeFlatMapStrategy[T] {
-        override def merge(node: Node[T], subtrees: List[Node[T]]): Node[T] =
-          Node(node.value, subtrees ::: node.subtrees)
-      }
+    /** A strategy to keep subtrees */
+    object JoinSubtrees extends FlatMapStrategy {
+
+      /** Concatenates new and existing subtrees of an expanded node. */
+      override def merge[T](newNode: Node[T], existingSubtrees: List[Node[T]]): Node[T] =
+        Node(newNode.value, existingSubtrees ::: newNode.subtrees)
+
+      /** Joins orphaned subtrees to the parent node. */
+      override def keepOrphanedSubtrees: Boolean = true
     }
+
+    /** A strategy to replace subtrees */
+    object Replace extends FlatMapStrategy {
+
+      /** Replaces old subtrees with the new ones. */
+      override def merge[T](newNode: Node[T], existingSubtrees: List[Node[T]]): Node[T] =
+        newNode
+
+      /** Removes orphaned subtrees completely. */
+      override def keepOrphanedSubtrees: Boolean = false
+    }
+
+  }
+
+  /** Useful methods to construct the tree */
+  object Builder {
+
+    /** Builds a tree from a list of pairs (numberOfChildren, value), where:
+      * - `value` is the value of a new node, and
+      * - `numberOfChildren` is a number of preceding elements in the list
+      *                      to become direct subtrees of the node.
+      * Rule of the list: Values of subtrees must always precede the value of a parent node. */
+    @tailrec
+    final def buildFromValueList[K](list: List[(Int, K)], result: List[Node[K]] = Nil): List[Tree[K]] = list match {
+      case Nil => result
+      case (size, value) :: xs =>
+        buildFromValueList(xs, Node(value, result.take(size)) :: result.drop(size))
+    }
+
+    /** Builds a tree from a list of pairs (numberOfChildren, node), where:
+      * - `node` is a new node, and
+      * - `numberOfChildren` is a number of preceding elements in the list
+      *                      to become direct subtrees of the current node.
+      * - `strategy` defines how to merge nodes and what to do with orphaned subtrees.
+      * Rule of the list: Nodes of subtrees must always precede the parent node. */
+    @tailrec
+    final def buildFromTreeList[K](
+      list: List[(Int, Tree[K])],
+      result: List[Node[K]] = Nil,
+      offset: Int = 0,
+      strategy: FlatMapStrategy = FlatMapStrategy.JoinSubtrees): List[Tree[K]] =
+      list match {
+        case Nil => result
+        case (size, tree) :: xs =>
+          tree match {
+            case `empty` =>
+              val offset = if (strategy.keepOrphanedSubtrees) size else -1
+              buildFromTreeList(xs, result.drop(size - offset), offset, strategy)
+            case node: Node[K] =>
+              val merged = strategy.merge(node, result.take(size))
+              buildFromTreeList(xs, merged :: result.drop(size), 0, strategy)
+          }
+      }
+  }
+
+  object Show {
+
+    def showAsArrays[T <: Any](tree: Tree[T]): String =
+      tree.mkString(_.toString, ",", "\n", "[", "]")
+
+    def showAsGraph[T <: Any](tree: Tree[T]): String =
+      tree.mkString(_.toString, " > ", "\n", "", "")
+
+    def showAsPaths[T <: Any](tree: Tree[T]): String =
+      tree.mkString(_.toString, "/", "\n", "", "")
 
   }
 
